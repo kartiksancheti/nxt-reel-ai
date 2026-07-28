@@ -111,6 +111,7 @@ def run_visual_director(
     pacing_map: dict[str, dict],
     real_templates: list[str],
     browser_url: str | None,
+    treatment: str | None = None,
 ) -> list[VisualEvent]:
     """Returns a list of VisualEvent. Falls back to an empty list (i.e.
     just the original talking-head footage, no overlays) if the call
@@ -130,12 +131,19 @@ def run_visual_director(
             ],
             indent=2,
         )
+
+        user_content = f"Segments:\n{segments_json}"
+        if treatment:
+            user_content = (
+                f"Creative Director's treatment for this video:\n{treatment}\n\n{user_content}"
+            )
+
         response = client.chat.completions.create(
             model=settings.openai_director_model,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _build_system_prompt(real_templates, browser_url)},
-                {"role": "user", "content": f"Segments:\n{segments_json}"},
+                {"role": "user", "content": user_content},
             ],
         )
         data = json.loads(response.choices[0].message.content)

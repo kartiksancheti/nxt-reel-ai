@@ -24,6 +24,7 @@ in the API route afterward as a final safety net.
 import logging
 
 from app.ai.agents.caption_styles import get_caption_style
+from app.ai.agents.creative_director import run_creative_director
 from app.ai.agents.motion_graphics_designer import run_motion_graphics_designer
 from app.ai.agents.pacing_editor import run_pacing_editor
 from app.ai.agents.script_analyst import run_script_analyst
@@ -50,6 +51,9 @@ def run_multi_agent_director(
         project_id, style_preset, len(segments),
     )
 
+    treatment = run_creative_director(segments, style_preset)
+    logger.info("Creative Director treatment for project=%s:\n%s", project_id, treatment)
+
     segments, cta_events = run_script_analyst(segments, style_preset)
     pacing_map = run_pacing_editor(segments)
 
@@ -57,7 +61,7 @@ def run_multi_agent_director(
         name.removesuffix(".html") for name in get_real_ui_template_names()
     )
     visual_events = run_visual_director(
-        segments, pacing_map, real_templates, settings.browser_demo_url
+        segments, pacing_map, real_templates, settings.browser_demo_url, treatment
     )
     visual_events = run_motion_graphics_designer(visual_events)
 
