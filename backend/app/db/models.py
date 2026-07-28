@@ -34,6 +34,7 @@ class Project(Base):
     source_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     transcript: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     timeline_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    caption_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     rendered_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     exported_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)

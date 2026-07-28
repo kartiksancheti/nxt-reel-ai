@@ -217,7 +217,12 @@ def _build_kinetic_caption_clips(timeline: Timeline, cut_plan: CutPlan) -> list:
                 if not word.text.strip():
                     continue
                 w_start = max(word.start + shift, 0.0)
-                w_duration = max(word.end - word.start, 0.08)
+                # Clamp to this segment's own end — Whisper's word
+                # timestamps occasionally run slightly past the segment
+                # boundary, which otherwise makes this caption briefly
+                # overlap the next segment's caption after the cut.
+                clamped_end = min(word.end, segment.end)
+                w_duration = max(clamped_end - word.start, 0.08)
                 try:
                     txt_clip = (
                         TextClip(

@@ -11,7 +11,7 @@ from app.models.timeline import CaptionStyle
 STYLE_CAPTION_MAP: dict[str, CaptionStyle] = {
     "alex_hormozi": CaptionStyle(
         font="Liberation-Sans-Bold", size=76, color="#FFFFFF",
-        highlight_color="#FFE600", position="center", animation="word_pop",
+        highlight_color="#F7C204", position="bottom", animation="word_pop",
     ),
     "ali_abdaal": CaptionStyle(
         font="Liberation-Sans-Bold", size=58, color="#FFFFFF",

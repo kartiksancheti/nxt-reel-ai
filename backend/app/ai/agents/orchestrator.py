@@ -41,6 +41,7 @@ def run_multi_agent_director(
     project_id: str,
     style_preset: str,
     duration: float,
+    caption_overrides: dict | None = None,
 ) -> Timeline:
     settings = get_settings()
 
@@ -65,7 +66,13 @@ def run_multi_agent_director(
     # already set from each segment's timing.
 
     audio_events = run_sound_designer(segments, duration)
+
     caption_style = get_caption_style(style_preset)
+    if caption_overrides:
+        # User-provided overrides win over the preset's defaults, field
+        # by field — e.g. keep the preset's font/position/animation but
+        # swap just the highlight color.
+        caption_style = caption_style.model_copy(update=caption_overrides)
 
     timeline = Timeline(
         project_id=project_id,

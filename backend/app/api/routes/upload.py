@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 from pathlib import Path
 
@@ -24,6 +25,11 @@ async def upload_video(
     file: UploadFile,
     style_preset: str = Form(default="minimal"),
     expected_md5: str | None = Form(default=None),
+    caption_font: str | None = Form(default=None),
+    caption_color: str | None = Form(default=None),
+    caption_highlight_color: str | None = Form(default=None),
+    caption_position: str | None = Form(default=None),
+    caption_animation: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectOut:
     """Accept a talking-head video upload and create a new Project.
@@ -33,9 +39,30 @@ async def upload_video(
     writing to disk and rejected with a 400 if it doesn't match — this
     guards against upload corruption happening somewhere on the network
     path, which would otherwise silently poison an entire render with a
-    garbled source video."""
+    garbled source video.
+
+    Any of the caption_* fields, if provided, override that specific
+    attribute of the chosen style_preset's default caption look — e.g.
+    you can pick the "minimal" preset but override just its color,
+    leaving everything else (font, position, animation) as the preset
+    default."""
     settings = get_settings()
     project = Project(style_preset=style_preset, status=ProjectStatus.UPLOADED)
+
+    overrides = {
+        k: v
+        for k, v in {
+            "font": caption_font,
+            "color": caption_color,
+            "highlight_color": caption_highlight_color,
+            "position": caption_position,
+            "animation": caption_animation,
+        }.items()
+        if v
+    }
+    if overrides:
+        project.caption_overrides = overrides
+
     db.add(project)
     await db.flush()
 

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.agents.orchestrator import run_multi_agent_director
 from app.ai.validator import validate_and_fix_timeline
+from app.services.retake_detector import detect_and_filter_retakes
 from app.api.deps import get_db
 from app.db.models import Project, ProjectStatus
 from app.models.project import ProjectOut
@@ -28,6 +29,15 @@ async def generate_timeline(project_id: uuid.UUID, db: AsyncSession = Depends(ge
 
     try:
         segments = [Segment(**s) for s in project.transcript["segments"]]
+
+        original_count = len(segments)
+        segments = detect_and_filter_retakes(segments)
+        if len(segments) < original_count:
+            logger.info(
+                "Retake detector removed %d segment(s) for project=%s",
+                original_count - len(segments), project_id,
+            )
+
         duration = segments[-1].end if segments else 0.0
 
         timeline = run_multi_agent_director(
@@ -35,6 +45,7 @@ async def generate_timeline(project_id: uuid.UUID, db: AsyncSession = Depends(ge
             project_id=str(project.id),
             style_preset=project.style_preset,
             duration=duration,
+            caption_overrides=project.caption_overrides,
         )
         timeline = validate_and_fix_timeline(timeline)
         project.timeline_json = timeline.model_dump()

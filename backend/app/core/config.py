@@ -34,6 +34,17 @@ class Settings(BaseSettings):
     jamendo_client_id: str | None = None
     browser_demo_url: str | None = None
 
+    # Optional creator branding used by the caption/description generator.
+    # Leave any of these unset and that block is simply omitted rather
+    # than showing a placeholder — nothing is hardcoded to any specific
+    # person's brand.
+    creator_instagram_url: str | None = None
+    creator_youtube_url: str | None = None
+    creator_tiktok_url: str | None = None
+    creator_linkedin_url: str | None = None
+    creator_community_url: str | None = None
+    creator_community_label: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

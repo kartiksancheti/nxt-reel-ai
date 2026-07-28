@@ -9,6 +9,7 @@ class ProjectOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    caption_overrides: dict | None = None
     rendered_video_path: str | None = None
     exported_video_path: str | None = None
     error_message: str | None = None
