@@ -14,16 +14,14 @@ from app.models.project import ProjectOut
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["upload"])
 
-CHUNK_SIZE = 1024 * 1024  # 1MB — stream to disk instead of one giant read/write,
-# which sidesteps a class of large-file corruption bugs seen in some
-# Starlette/python-multipart versions when reading an entire upload in
-# a single .read() call.
+CHUNK_SIZE = 1024 * 1024
 
 
 @router.post("/upload", response_model=ProjectOut)
 async def upload_video(
     file: UploadFile,
     style_preset: str = Form(default="minimal"),
+    layout: str = Form(default="full"),
     expected_md5: str | None = Form(default=None),
     caption_font: str | None = Form(default=None),
     caption_color: str | None = Form(default=None),
@@ -34,20 +32,12 @@ async def upload_video(
 ) -> ProjectOut:
     """Accept a talking-head video upload and create a new Project.
 
-    If the client provides `expected_md5` (the file's real MD5 hash,
-    computed client-side before sending), the upload is verified after
-    writing to disk and rejected with a 400 if it doesn't match — this
-    guards against upload corruption happening somewhere on the network
-    path, which would otherwise silently poison an entire render with a
-    garbled source video.
-
-    Any of the caption_* fields, if provided, override that specific
-    attribute of the chosen style_preset's default caption look — e.g.
-    you can pick the "minimal" preset but override just its color,
-    leaving everything else (font, position, animation) as the preset
-    default."""
+    `layout` selects the overall visual layout: "full" (default — normal
+    full-frame speaker with B-roll cutaways) or "split_demo" (top half is
+    a Konva.js-generated demo graphic, bottom half is the speaker,
+    continuously, for the whole video)."""
     settings = get_settings()
-    project = Project(style_preset=style_preset, status=ProjectStatus.UPLOADED)
+    project = Project(style_preset=style_preset, layout=layout, status=ProjectStatus.UPLOADED)
 
     overrides = {
         k: v

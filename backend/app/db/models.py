@@ -27,6 +27,7 @@ class Project(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     style_preset: Mapped[str] = mapped_column(String, default="minimal")
+    layout: Mapped[str] = mapped_column(String, default="full")
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(ProjectStatus), default=ProjectStatus.UPLOADED
     )
@@ -34,6 +35,7 @@ class Project(Base):
     source_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     transcript: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     timeline_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    creative_treatment: Mapped[str | None] = mapped_column(String, nullable=True)
     caption_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     rendered_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     exported_video_path: Mapped[str | None] = mapped_column(String, nullable=True)

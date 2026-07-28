@@ -32,14 +32,23 @@ class MotionGraphicsEngine(BaseVisualEngine):
         text = event.prompt or ""
         logger.info("Generating motion graphic (as transparent PNG): '%s'", text)
 
-        txt_clip = TextClip(
-            text,
-            fontsize=70,
-            color="white",
-            font="Liberation-Sans-Bold",
-            method="caption",
-            size=(900, None),
-            align="center",
+        txt_clip = (
+            TextClip(
+                text,
+                fontsize=80,
+                color="white",
+                font="Liberation-Sans-Bold",
+                method="caption",
+                size=(900, None),
+                align="center",
+                stroke_color="black",
+                stroke_width=3,
+            )
+            # Centered — without this, MoviePy defaults new clips to the
+            # top-left corner, which is what caused this text to render
+            # pinned awkwardly at the top of the frame instead of as an
+            # intentional, well-placed callout.
+            .set_position("center")
         )
         composite = CompositeVideoClip([txt_clip], size=(1080, 1920))
         composite.save_frame(str(image_path), t=0, withmask=True)

@@ -19,11 +19,12 @@ const FONTS = [
   "Liberation-Serif-Bold",
 ];
 
-const POSITIONS = ["top", "center", "bottom"];
+const POSITIONS = ["top", "center", "bottom", "safe_top", "split_line"];
 const ANIMATIONS = [
   { value: "word_pop", label: "Word Pop" },
   { value: "karaoke", label: "Karaoke" },
   { value: "typewriter", label: "Typewriter" },
+  { value: "progressive_reveal", label: "Progressive Reveal (Line)" },
 ];
 
 const PRESET_DEFAULTS: Record<
@@ -53,6 +54,14 @@ interface Project {
   rendered_video_path: string | null;
   exported_video_path: string | null;
   error_message: string | null;
+  creative_treatment?: string | null;
+}
+
+interface TimelineDetail {
+  id: string;
+  transcript: { segments: { id: string; start: number; end: number; text: string }[] } | null;
+  creative_treatment: string | null;
+  timeline_json: any;
 }
 
 const PREVIEW_WORDS = ["This", "is", "how", "your", "captions", "will", "look"];
@@ -198,11 +207,19 @@ export default function Home() {
   const [position, setPosition] = useState(PRESET_DEFAULTS.minimal.position);
   const [animation, setAnimation] = useState(PRESET_DEFAULTS.minimal.animation);
 
+  const [splitDemo, setSplitDemo] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TimelineDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [chatMessage, setChatMessage] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const [chatNotes, setChatNotes] = useState<string | null>(null);
 
   function handlePresetChange(preset: string) {
     setStylePreset(preset);
@@ -255,6 +272,7 @@ export default function Home() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("style_preset", stylePreset);
+    formData.append("layout", splitDemo ? "split_demo" : "full");
     if (useCustom) {
       formData.append("caption_font", font);
       formData.append("caption_color", color);
@@ -293,6 +311,52 @@ export default function Home() {
 
   function statusLabel(status: string) {
     return status.replace(/_/g, " ");
+  }
+
+  async function toggleDetails(project: Project) {
+    if (expandedId === project.id) {
+      setExpandedId(null);
+      setDetail(null);
+      setChatNotes(null);
+      return;
+    }
+    setExpandedId(project.id);
+    setDetail(null);
+    setChatNotes(null);
+    setChatMessage("");
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/timeline/${project.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDetail(data);
+      }
+    } catch {
+      // leave detail null — panel will show nothing loaded
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function sendChatEdit(projectId: string) {
+    if (!chatMessage.trim()) return;
+    setChatSending(true);
+    setChatNotes(null);
+    try {
+      const res = await fetch(`${API_URL}/chat-edit/${projectId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: chatMessage }),
+      });
+      const data = await res.json();
+      setChatNotes(data.notes || "Done.");
+      setChatMessage("");
+      await fetchProjects();
+    } catch {
+      setChatNotes("Failed to apply that change — network error.");
+    } finally {
+      setChatSending(false);
+    }
   }
 
   return (
@@ -345,6 +409,17 @@ export default function Home() {
                 onChange={(e) => toggleCustom(e.target.checked)}
               />
               Customize caption style
+            </label>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={splitDemo}
+                onChange={(e) => setSplitDemo(e.target.checked)}
+              />
+              Split-screen demo layout (Konva top half + talking head bottom half)
             </label>
           </div>
 
@@ -494,6 +569,7 @@ export default function Home() {
                 <th style={{ padding: "8px 6px" }}>Style</th>
                 <th style={{ padding: "8px 6px" }}>Status</th>
                 <th style={{ padding: "8px 6px" }}>Created</th>
+                <th style={{ padding: "8px 6px" }}>Details</th>
                 <th style={{ padding: "8px 6px" }}>Action</th>
               </tr>
             </thead>
@@ -528,6 +604,22 @@ export default function Home() {
                     </td>
                     <td style={{ padding: "8px 6px", color: "#888" }}>
                       {new Date(p.created_at).toLocaleString()}
+                    </td>
+                    <td style={{ padding: "8px 6px" }}>
+                      <button
+                        onClick={() => toggleDetails(p)}
+                        style={{
+                          padding: "5px 12px",
+                          borderRadius: 6,
+                          border: "1px solid #ccc",
+                          background: expandedId === p.id ? "#333" : "#fff",
+                          color: expandedId === p.id ? "#fff" : "#333",
+                          cursor: "pointer",
+                          fontSize: 13,
+                        }}
+                      >
+                        {expandedId === p.id ? "Hide" : "Details"}
+                      </button>
                     </td>
                     <td style={{ padding: "8px 6px" }}>
                       {p.status === "exported" || p.status === "rendered" ? (
@@ -568,6 +660,116 @@ export default function Home() {
               })}
             </tbody>
           </table>
+
+          {expandedId &&
+            (() => {
+              const proj = projects.find((p) => p.id === expandedId);
+              if (!proj) return null;
+              return (
+                <div
+                  style={{
+                    marginTop: 20,
+                    padding: 16,
+                    background: "#f7f7f8",
+                    borderRadius: 8,
+                  }}
+                >
+                  <h3 style={{ marginTop: 0, fontSize: 16 }}>
+                    Project {proj.id.slice(0, 8)} details
+                  </h3>
+
+                  {detailLoading && <p style={{ color: "#888" }}>Loading…</p>}
+
+                  {detail && (
+                    <>
+                      <div style={{ marginBottom: 16 }}>
+                        <strong style={{ fontSize: 13 }}>Creative Director&apos;s treatment</strong>
+                        <p
+                          style={{
+                            whiteSpace: "pre-wrap",
+                            fontSize: 13,
+                            color: "#333",
+                            marginTop: 6,
+                          }}
+                        >
+                          {detail.creative_treatment ||
+                            "No treatment generated yet — run Generate Timeline first."}
+                        </p>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <strong style={{ fontSize: 13 }}>Transcript</strong>
+                        <div
+                          style={{
+                            maxHeight: 160,
+                            overflowY: "auto",
+                            fontSize: 13,
+                            color: "#555",
+                            marginTop: 6,
+                            background: "#fff",
+                            border: "1px solid #eee",
+                            borderRadius: 6,
+                            padding: 8,
+                          }}
+                        >
+                          {detail.transcript?.segments?.length ? (
+                            detail.transcript.segments.map((s, i) => (
+                              <p key={i} style={{ margin: "4px 0" }}>
+                                <span style={{ color: "#999" }}>[{s.start.toFixed(1)}s]</span>{" "}
+                                {s.text}
+                              </p>
+                            ))
+                          ) : (
+                            <p style={{ color: "#aaa" }}>No transcript yet.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <strong style={{ fontSize: 13 }}>Ask for a change</strong>
+                        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                          <input
+                            type="text"
+                            value={chatMessage}
+                            onChange={(e) => setChatMessage(e.target.value)}
+                            placeholder="e.g. make captions bigger, or remove the b-roll at 0:14"
+                            style={{
+                              flex: 1,
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #ccc",
+                            }}
+                          />
+                          <button
+                            onClick={() => sendChatEdit(proj.id)}
+                            disabled={chatSending || !chatMessage.trim()}
+                            style={{
+                              padding: "8px 16px",
+                              borderRadius: 6,
+                              border: "none",
+                              background: "#1a1a1a",
+                              color: "#fff",
+                              cursor: chatSending ? "wait" : "pointer",
+                            }}
+                          >
+                            {chatSending ? "Applying…" : "Send"}
+                          </button>
+                        </div>
+                        {chatNotes && (
+                          <p style={{ marginTop: 8, fontSize: 13, color: "#2d8fd6" }}>
+                            {chatNotes}
+                          </p>
+                        )}
+                        <p style={{ fontSize: 12, color: "#999", marginTop: 6 }}>
+                          Applying a change invalidates any existing render — press Render again
+                          afterward to see it.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
         </div>
       )}
     </main>

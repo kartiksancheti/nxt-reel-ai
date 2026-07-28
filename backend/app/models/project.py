@@ -6,6 +6,7 @@ from pydantic import BaseModel, field_validator
 class ProjectOut(BaseModel):
     id: str
     style_preset: str
+    layout: str = "full"
     status: str
     created_at: datetime
     updated_at: datetime
@@ -13,6 +14,7 @@ class ProjectOut(BaseModel):
     rendered_video_path: str | None = None
     exported_video_path: str | None = None
     error_message: str | None = None
+    creative_treatment: str | None = None
 
     @field_validator("id", "status", mode="before")
     @classmethod

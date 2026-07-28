@@ -2,11 +2,12 @@
 Agent 3: Visual Director.
 
 Job: for each segment, decide WHICH KIND of visual fits (real B-roll,
-a stat callout, a generated image, an on-screen demo) — but never invent
-a specific asset name, filename, or URL. It only ever describes what it
-wants in generic, real-world terms; the actual asset resolution happens
-later by real engines (Stock Footage, Image Generation, etc.) or gets
-caught by the Validator if something still slips through.
+a stat callout, a generated image, an on-screen demo, or a PIP "bubble"
+cutaway) — but never invent a specific asset name, filename, or URL. It
+only ever describes what it wants in generic, real-world terms; the
+actual asset resolution happens later by real engines (Stock Footage,
+Image Generation, etc.) or gets caught by the Validator if something
+still slips through.
 
 This agent is deliberately given a closed list of what's real:
   - the actual UI template filenames that exist on disk
@@ -20,6 +21,10 @@ not the segment's entire duration — real editing cuts away briefly and
 then returns to the speaker's face. Without this, every visual event
 ends up covering its whole segment, which reads as sluggish rather than
 punchy.
+
+If a Creative Director treatment is provided, it's included as extra
+context so this agent executes a specific creative vision instead of
+deciding in a vacuum.
 """
 import json
 import logging
@@ -37,7 +42,10 @@ MAX_INSERT_FRACTION = 0.85  # never let an insert eat almost the whole segment
 
 
 def _build_system_prompt(real_templates: list[str], browser_url: str | None) -> str:
-    sources = ["stock_footage", "motion_graphics", "image_generation", "ui_template", "original_footage"]
+    sources = [
+        "stock_footage", "motion_graphics", "image_generation",
+        "ui_template", "original_footage", "pip_overlay",
+    ]
     browser_note = ""
     if browser_url:
         sources.insert(0, "browser")
@@ -53,24 +61,66 @@ source types ONLY: {", ".join(sources)}.
 For "ui_template" events, asset_ref MUST be one of these exact existing
 template names (do not invent new ones): {templates_note}
 
-For "stock_footage" and "image_generation" events, do NOT set asset_ref
-at all — instead write a generic, real-world "prompt" describing the
-visual (e.g. "laptop screen showing a spreadsheet", "city skyline at
-night"). Never invent a specific brand/product/asset name.
+For "stock_footage", "image_generation", and "pip_overlay" events, do NOT
+set asset_ref at all — instead write a generic, real-world "prompt"
+describing the visual.
+
+CRITICAL constraint on "prompt" for stock_footage and pip_overlay: these
+get matched against a REAL stock footage library search (Pexels-style).
+That search can only find generic, real-world scenes that actually exist
+as filmed footage — it CANNOT find a specific fictional document, a
+specific UI mockup with invented text/labels, or a screenshot of a
+"template titled X". Prompts like "invoice stamped $7,500 PAID" or
+"UI template titled 'Bottleneck Map' with three gold checklist rows"
+will fail to match anything real and return irrelevant footage.
+
+Instead, describe the generic REAL-WORLD equivalent of what you're going
+for — e.g. instead of "invoice stamped $7,500 PAID", write "hands
+signing a printed invoice on a desk"; instead of "UI template titled
+'Bottleneck Map'", write "laptop screen showing a colorful project
+dashboard" or "person typing on a laptop with a spreadsheet open". Keep
+every prompt to something a real stock footage search would plausibly
+have footage of. "image_generation" prompts are the ONE exception where
+specific invented visuals (like a custom UI mockup or graphic) are fine,
+since that gets rendered fresh rather than searched for.
+
+"pip_overlay" is a picture-in-picture "bubble" cutaway: the speaker's own
+face shrinks into a small circle (bottom-right corner) while the B-roll
+described in "prompt" fills the rest of the frame behind it, then the
+video pops back to full-frame speaker afterward. Use this when you want
+to show something on screen WITHOUT fully cutting away from the speaker.
+
+IMPORTANT for pip_overlay specifically: if you want the bubble effect to
+span multiple consecutive segments (e.g. covering a longer explanation),
+give EACH segment its own pip_overlay event that covers that segment's
+ENTIRE duration (insert_offset near 0, insert_duration close to the full
+segment length) — do NOT give it only a short 1-2 second window within
+each segment. A pip_overlay that only covers a fraction of the segment
+will cause the speaker's full-frame face to visibly pop back in in the
+middle of segments where you wanted the bubble to stay, which reads as
+a jarring flicker rather than a smooth continuous effect.
 
 For "motion_graphics" events, keep them SHORT — never more than 4
 seconds — and only for a specific stat, label, or callout tied to one
 moment. Never describe the overall caption style of the video.
 
 TIMING — this matters a lot for pacing: every visual event (except
-"original_footage") is a brief CUTAWAY within the segment, not the
-whole segment. Provide:
+"original_footage" and "pip_overlay") is a brief CUTAWAY within the
+segment, not the whole segment. Provide:
   - "insert_offset": seconds from the START of the segment where the
     cutaway begins (usually 0.2-1.0s in, so the speaker's face is seen
     briefly first)
   - "insert_duration": how long the cutaway lasts, in seconds
     (typically 1.0-2.5s for B-roll/images/UI, up to 4s for motion
-    graphics). Never span the entire segment.
+    graphics). Never span the entire segment for these cutaway types.
+For "pip_overlay", as noted above, insert_offset should be near 0 and
+insert_duration should cover the segment's full length instead.
+
+Also avoid stacking two full-frame cutaways (stock_footage,
+motion_graphics, image_generation, ui_template, browser) back-to-back
+with little or no gap between them — that reads as flickery rather than
+punchy. Leave the speaker's face visible for at least a second or two
+between separate cutaways.
 
 Return EXACTLY this JSON shape, nothing else:
 {{
@@ -104,6 +154,13 @@ def _resolve_insert_window(
     start = segment.start + offset
     end = min(start + duration, segment.end)
     return start, end
+
+
+def _resolve_pip_window(segment: Segment) -> tuple[float, float]:
+    """PIP overlay events always span the segment's FULL duration rather
+    than a short cutaway window — this is what keeps a multi-segment PIP
+    effect continuous instead of snapping in and out mid-effect."""
+    return segment.start, segment.end
 
 
 def run_visual_director(
@@ -160,9 +217,12 @@ def run_visual_director(
             if source == VisualSource.ORIGINAL_FOOTAGE:
                 continue  # nothing to build an overlay for
 
-            start, end = _resolve_insert_window(
-                segment, raw.get("insert_offset"), raw.get("insert_duration")
-            )
+            if source == VisualSource.PIP_OVERLAY:
+                start, end = _resolve_pip_window(segment)
+            else:
+                start, end = _resolve_insert_window(
+                    segment, raw.get("insert_offset"), raw.get("insert_duration")
+                )
 
             try:
                 events.append(

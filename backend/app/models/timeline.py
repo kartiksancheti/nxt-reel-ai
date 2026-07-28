@@ -20,6 +20,7 @@ class VisualSource(StrEnum):
     IMAGE_GENERATION = "image_generation"
     UI_TEMPLATE = "ui_template"
     ORIGINAL_FOOTAGE = "original_footage"
+    PIP_OVERLAY = "pip_overlay"
 
 
 class CameraMove(StrEnum):
@@ -36,8 +37,8 @@ class CaptionStyle(BaseModel):
     size: int = 64
     color: str = "#FFFFFF"
     highlight_color: str = "#FFE600"
-    position: str = "center"  # center | bottom | top
-    animation: str = "word_pop"  # word_pop | typewriter | karaoke
+    position: str = "center"  # center | bottom | top | safe_top | split_line
+    animation: str = "word_pop"  # word_pop | typewriter | karaoke | progressive_reveal
 
 
 class Word(BaseModel):
@@ -72,6 +73,52 @@ class VisualEvent(BaseModel):
     z_index: int = 0
 
 
+class SceneElement(BaseModel):
+    """One labeled node in a diagram-style Konva scene — e.g. one step in
+    a "lead entry -> contract creation -> follow-ups" sequence. Position
+    is given as a percentage (0-100) of the top-half frame, so the Konva
+    template can place it regardless of exact pixel resolution.
+    reveal_at is a 0.0-1.0 fraction of the scene's own duration — when
+    this element animates in relative to the scene's start."""
+
+    text: str
+    x_pct: float = 50.0
+    y_pct: float = 50.0
+    reveal_at: float = 0.0
+
+
+class SceneEvent(BaseModel):
+    """A single Konva.js-rendered scene for the TOP HALF of a 'split_demo'
+    layout video (the bottom half is the speaker's talking-head footage).
+    Deliberately a closed, structured schema — never free-form code, so
+    the Konva engine can render every scene deterministically without any
+    injection risk.
+
+    "layout_type" picks which Konva template this scene uses:
+      - "simple": a title + up to 3 bullets + one background shape
+        (circle/arrow/checklist/flow) — good for a single idea/moment.
+      - "diagram": multiple labeled nodes (from "elements"), optionally
+        connected by lines (from "connections", pairs of element
+        indices) — good for enumerated steps/options mentioned in the
+        script (e.g. "lead entry, contract creation, follow-ups").
+      - "counter": a single big number/stat that counts up on screen —
+        good for a stat callout moment.
+    """
+
+    segment_id: str
+    start: float
+    end: float
+    layout_type: str = "simple"  # simple | diagram | counter
+    title: str = ""
+    bullets: list[str] = Field(default_factory=list)
+    shape: str = "circle"  # circle | arrow | checklist | flow (used by "simple" only)
+    accent_color: str = "#4EA8FF"
+    elements: list[SceneElement] = Field(default_factory=list)  # used by "diagram"
+    connections: list[list[int]] = Field(default_factory=list)  # used by "diagram"
+    counter_value: str = ""  # used by "counter", e.g. "92%" or "30"
+    counter_label: str = ""  # used by "counter", e.g. "days"
+
+
 class AudioEvent(BaseModel):
     kind: str  # "music" | "sfx"
     asset_ref: str
@@ -94,9 +141,12 @@ class Timeline(BaseModel):
     fps: int = 30
     resolution: tuple[int, int] = (1080, 1920)
 
+    layout: str = "full"  # "full" | "split_demo"
+
     caption_style: CaptionStyle = Field(default_factory=CaptionStyle)
     segments: list[Segment] = Field(default_factory=list)
     visual_events: list[VisualEvent] = Field(default_factory=list)
+    scene_events: list[SceneEvent] = Field(default_factory=list)
     audio_events: list[AudioEvent] = Field(default_factory=list)
     cta_events: list[CTAEvent] = Field(default_factory=list)
 
