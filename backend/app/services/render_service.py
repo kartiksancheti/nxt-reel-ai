@@ -316,7 +316,10 @@ def _build_audio_track(timeline: Timeline, base_audio):
     simplification until a real music library is wired in."""
     layers = []
     if base_audio is not None:
-        layers.append(base_audio)
+        # Boost dialogue ~40% louder before mixing in music/SFX, so voice
+        # always sits clearly above the background bed regardless of how
+        # quiet the original mic recording was.
+        layers.append(base_audio.volumex(1.4))
 
     settings = get_settings()
     for event in timeline.audio_events:

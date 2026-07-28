@@ -118,7 +118,7 @@ def validate_and_fix_timeline(timeline: Timeline) -> Timeline:
         # must never be loud enough to compete with the speaker's voice.
         # This is enforced here regardless of the agent's own judgment,
         # since a too-loud music bed makes a video unwatchable.
-        max_volume_db = -18.0 if event.kind == "music" else -6.0
+        max_volume_db = -28.0 if event.kind == "music" else -12.0
         if event.volume_db > max_volume_db:
             logger.warning(
                 "Clamping %s volume from %.1fdB to %.1fdB (segment/asset=%s)",
