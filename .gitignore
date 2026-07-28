@@ -30,3 +30,4 @@ backend/app/engines/ui_templates/__pycache__/
 .DS_Store
 .vscode/
 *.swp
+*.tar.gz
