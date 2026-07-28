@@ -42,6 +42,7 @@ def transcribe_audio(audio_path: str) -> dict:
             file=f,
             response_format="verbose_json",
             timestamp_granularities=["word", "segment"],
+            prompt="Yeh video mein hum baat karenge business growth ke baare mein, kaise aap apna kaam grow kar sakte hain.",
         )
     return response.model_dump()
 

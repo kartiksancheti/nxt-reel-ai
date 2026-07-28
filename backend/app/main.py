@@ -19,7 +19,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # fine for now; tighten to your actual domain later
+    allow_origins=["https://reel.nxtautomation.online"],  # fine for now; tighten to your actual domain later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
