@@ -37,7 +37,7 @@ from app.engines.konva_scene_engine import KonvaSceneEngine
 from app.engines.motion_graphics_engine import MotionGraphicsEngine
 from app.engines.stock_engine import StockFootageEngine
 from app.engines.ui_template_engine import UITemplateEngine
-from app.models.timeline import CameraMove, Segment, Timeline, VisualSource
+from app.models.timeline import CameraMove, Segment, Timeline, VisualSource, Word
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,6 @@ CUTAWAY_SOURCES = {
 PIP_DIAMETER = 460
 PIP_MARGIN = 40
 
-# Y-coordinates for exact caption placement, used by the progressive-
-# reveal renderer. "safe_top" sits well above where Instagram Reels' own
-# UI (bottom caption/username bar, right-side icons) would ever overlap.
-# "split_line" sits just above the halfway point, for the split_demo
-# layout where captions bridge the top/bottom halves.
 PROGRESSIVE_Y_MAP = {
     "top": 180,
     "center": 860,
@@ -81,6 +76,13 @@ PROGRESSIVE_Y_MAP = {
     "safe_top": int(TARGET_RESOLUTION[1] * 0.20),
     "split_line": 900,
 }
+
+# Captions never render wider than this — long sentences wrap to a new
+# line instead of running off the sides of the frame.
+MAX_CAPTION_LINE_WIDTH = int(TARGET_RESOLUTION[0] * 0.88)
+# At most this many lines are shown on screen at once — older lines
+# scroll off (like a lyric display) instead of stacking indefinitely.
+MAX_VISIBLE_CAPTION_LINES = 2
 
 
 async def resolve_visual_assets(timeline: Timeline) -> dict[str, str]:
@@ -105,8 +107,6 @@ async def resolve_visual_assets(timeline: Timeline) -> dict[str, str]:
 
 
 async def resolve_scene_assets(timeline: Timeline) -> dict[str, str]:
-    """Resolves every SceneEvent (split_demo layout only) into a rendered
-    Konva video clip. No-op for the "full" layout."""
     if timeline.layout != "split_demo" or not timeline.scene_events:
         return {}
     engine = KonvaSceneEngine()
@@ -142,8 +142,6 @@ def _fit_to_target(clip):
 
 
 def _fit_to_half(clip, half: str = "bottom"):
-    """Resize + center-crop a clip to fill exactly the top or bottom HALF
-    of the target frame (used by the split_demo layout)."""
     target_w = TARGET_RESOLUTION[0]
     target_h = TARGET_RESOLUTION[1] // 2
     clip_ratio = clip.w / clip.h
@@ -187,10 +185,6 @@ def _load_visual_clip(asset_path: str, duration: float):
 
 
 class CutPlan:
-    """Maps a Timeline's original (raw-footage) timestamps to a new,
-    jump-cut timeline that only includes the segments where someone is
-    actually speaking."""
-
     def __init__(self, timeline: Timeline):
         segments: list[Segment] = sorted(timeline.segments, key=lambda s: s.start)
         self.cut_ranges: list[tuple[float, float]] = []
@@ -238,10 +232,6 @@ class CutPlan:
 
 
 def _build_cut_base_clip(source_video_path: str, cut_plan: CutPlan, fit_full: bool = True):
-    """Concatenate only the speaking ranges from the source footage, back
-    to back. If fit_full is False, returns the raw concatenated clip
-    without fitting to the full frame — used by the split_demo layout,
-    which fits it to the bottom HALF instead."""
     source = VideoFileClip(source_video_path)
     subclips = []
     for start, end in cut_plan.cut_ranges:
@@ -380,17 +370,27 @@ def _build_visual_overlay_clips(
 def _build_split_layout_clips(
     timeline: Timeline, scene_assets: dict[str, str], cut_plan: CutPlan
 ) -> list:
-    """Top-half Konva scene clips for the split_demo layout, one per
-    SceneEvent, positioned to fill exactly the top half of the frame for
-    that segment's full (shifted) duration."""
-    clips = []
+    """Top-half Konva scene clips for the split_demo layout. Each scene's
+    on-screen duration is extended to run right up until the NEXT scene
+    starts (or to the end of the video for the last one) — closing the
+    small gaps CutPlan leaves between cut ranges, which previously left
+    a brief black/empty top-half flash between every scene transition."""
+    entries = []
     for scene in timeline.scene_events:
         path = scene_assets.get(scene.segment_id)
         if not path:
             continue
-        duration = max(scene.end - scene.start, 0.1)
         shift = cut_plan.shift_for_segment(scene.segment_id)
         new_start = max(scene.start + shift, 0.0)
+        entries.append((new_start, scene, path))
+    entries.sort(key=lambda e: e[0])
+
+    clips = []
+    for idx, (new_start, scene, path) in enumerate(entries):
+        if idx + 1 < len(entries):
+            duration = max(entries[idx + 1][0] - new_start, 0.3)
+        else:
+            duration = max(cut_plan.total_duration - new_start, max(scene.end - scene.start, 0.5))
         try:
             clip = VideoFileClip(path).without_audio()
             if clip.duration < duration:
@@ -419,10 +419,6 @@ def _motion_graphics_windows(timeline: Timeline, cut_plan: CutPlan) -> list[tupl
 
 
 def _cta_windows(timeline: Timeline, cut_plan: CutPlan) -> list[tuple[float, float]]:
-    """Time windows where a CTA overlay is on screen. Running word
-    captions are suppressed during these windows too — same reasoning
-    as motion graphics: two competing text elements on screen at once
-    reads as a bug, not a design choice."""
     windows = []
     for cta in timeline.cta_events:
         shift = cut_plan.shift_for_segment(cta.segment_id)
@@ -434,25 +430,61 @@ def _in_any_window(t: float, windows: list[tuple[float, float]]) -> bool:
     return any(start <= t < end for start, end in windows)
 
 
+def _measure_text_width(text: str, fontsize: int, font: str) -> int:
+    tc = TextClip(text, fontsize=fontsize, font=font, method="label")
+    w = tc.w
+    tc.close()
+    return w
+
+
+def _wrap_words(words: list[str], fontsize: int, font: str) -> list[list[str]]:
+    """Greedily wraps a list of words into lines that each fit within
+    MAX_CAPTION_LINE_WIDTH, measured using the actual font/size."""
+    lines: list[list[str]] = []
+    current: list[str] = []
+    for w in words:
+        trial = current + [w]
+        width = _measure_text_width(" ".join(trial), fontsize, font)
+        if width > MAX_CAPTION_LINE_WIDTH and current:
+            lines.append(current)
+            current = [w]
+        else:
+            current = trial
+    if current:
+        lines.append(current)
+    return lines
+
+
 def _build_progressive_reveal_clips(timeline: Timeline, cut_plan: CutPlan) -> list:
-    """Whole-sentence captions that build up word-by-word — all words
-    spoken so far stay visible on one line, and the word currently being
-    spoken is highlighted. Positioning is pixel-accurate: each
-    increment's width is measured directly from MoviePy's own rendered
-    TextClip."""
+    """Whole-sentence captions that build up word-by-word, wrapped to fit
+    the frame width. At most MAX_VISIBLE_CAPTION_LINES are shown at
+    once — once the sentence wraps past that, older lines scroll off
+    (like a lyric display) so nothing overflows the screen. The word
+    currently being spoken is highlighted; it's always the last word of
+    the bottom visible line."""
     style = timeline.caption_style
     clips = []
-    y = PROGRESSIVE_Y_MAP.get(style.position, PROGRESSIVE_Y_MAP["safe_top"])
+    anchor_y = PROGRESSIVE_Y_MAP.get(style.position, PROGRESSIVE_Y_MAP["safe_top"])
+    line_height = int(style.size * 1.3)
     suppress_windows = _motion_graphics_windows(timeline, cut_plan) + _cta_windows(timeline, cut_plan)
 
     for segment in timeline.segments:
-        words = segment.words
-        if not words or not segment.text.strip():
+        if not segment.text.strip():
             continue
         new_seg_start = cut_plan.new_start_for_segment(segment.id)
         if new_seg_start is None:
             continue
         shift = new_seg_start - segment.start
+
+        words = segment.words
+        if not words:
+            raw_words = segment.text.split()
+            if raw_words:
+                per_word = max(segment.end - segment.start, 0.1) / len(raw_words)
+                words = [
+                    Word(text=w, start=segment.start + i * per_word, end=segment.start + (i + 1) * per_word)
+                    for i, w in enumerate(raw_words)
+                ]
 
         for i, word in enumerate(words):
             w_start = max(word.start + shift, 0.0)
@@ -462,60 +494,59 @@ def _build_progressive_reveal_clips(timeline: Timeline, cut_plan: CutPlan) -> li
             w_duration = max((w_end_orig + shift) - w_start, 0.08)
 
             prefix_words = [w.text for w in words[:i] if w.text.strip()]
-            revealed_text = " ".join(prefix_words + [word.text])
+            revealed_words = prefix_words + [word.text]
 
             try:
-                revealed_clip = TextClip(
-                    revealed_text,
-                    fontsize=style.size,
-                    color=style.color,
-                    font=style.font,
-                    method="label",
-                    stroke_color="black",
-                    stroke_width=2,
-                )
-                block_w = revealed_clip.w
-                base_x = max((TARGET_RESOLUTION[0] - block_w) / 2, 0)
-                revealed_clip = (
-                    revealed_clip.set_position((base_x, y)).set_start(w_start).set_duration(w_duration)
-                )
-                clips.append(revealed_clip)
+                all_lines = _wrap_words(revealed_words, style.size, style.font)
+                display_lines = all_lines[-MAX_VISIBLE_CAPTION_LINES:]
+                num_lines = len(display_lines)
 
-                if prefix_words:
-                    prefix_with_space_clip = TextClip(
-                        " ".join(prefix_words) + " ",
+                for line_idx, line_words in enumerate(display_lines):
+                    line_text = " ".join(line_words)
+                    line_y = anchor_y - (num_lines - 1 - line_idx) * line_height
+
+                    line_clip = TextClip(
+                        line_text,
                         fontsize=style.size,
                         color=style.color,
-                        font=style.font,
-                        method="label",
-                    )
-                    current_x_offset = prefix_with_space_clip.w
-                    prefix_with_space_clip.close()
-                else:
-                    current_x_offset = 0
-
-                highlight_clip = (
-                    TextClip(
-                        word.text,
-                        fontsize=style.size,
-                        color=style.highlight_color,
                         font=style.font,
                         method="label",
                         stroke_color="black",
                         stroke_width=2,
                     )
-                    .set_position((base_x + current_x_offset, y))
-                    .set_start(w_start)
-                    .set_duration(w_duration)
-                )
-                clips.append(highlight_clip)
+                    line_x = max((TARGET_RESOLUTION[0] - line_clip.w) / 2, 0)
+                    line_clip = line_clip.set_position((line_x, line_y)).set_start(w_start).set_duration(w_duration)
+                    clips.append(line_clip)
+
+                    is_bottom_line = line_idx == num_lines - 1
+                    if is_bottom_line and line_words:
+                        prefix_in_line = line_words[:-1]
+                        if prefix_in_line:
+                            offset = _measure_text_width(" ".join(prefix_in_line) + " ", style.size, style.font)
+                        else:
+                            offset = 0
+                        highlight_clip = (
+                            TextClip(
+                                line_words[-1],
+                                fontsize=style.size,
+                                color=style.highlight_color,
+                                font=style.font,
+                                method="label",
+                                stroke_color="black",
+                                stroke_width=2,
+                            )
+                            .set_position((line_x + offset, line_y))
+                            .set_start(w_start)
+                            .set_duration(w_duration)
+                        )
+                        clips.append(highlight_clip)
             except Exception:
                 logger.exception(
                     "Failed to render progressive-reveal caption for word '%s' in segment=%s — skipping",
                     word.text, segment.id,
                 )
 
-    logger.info("Progressive-reveal captions: built %d clips at y=%d", len(clips), y)
+    logger.info("Progressive-reveal captions: built %d clips at anchor_y=%d", len(clips), anchor_y)
     return clips
 
 
