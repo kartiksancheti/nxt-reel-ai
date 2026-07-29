@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 HALF_WIDTH = 1080
 HALF_HEIGHT = 960
+START_TRIM_SECONDS = 0.4  # skip this much off the start of every recording — hides the natural browser-startup flash
 
 SHARED_JS = """
 function hexToRgb(hex) {
@@ -110,7 +111,7 @@ def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
 <body>
   <div id="stage"></div>
   <div class="title">{scene.title}</div>
-  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script src="file:///app/vendor/konva.min.js"></script>
   <script>{SHARED_JS}
     var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
     var layer = new Konva.Layer();
@@ -185,7 +186,7 @@ def _build_counter_html(scene: SceneEvent, duration: float) -> str:
   <div id="stage"></div>
   <div class="title">{scene.title}</div>
   <div class="counter-label">{scene.counter_label}</div>
-  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script src="file:///app/vendor/konva.min.js"></script>
   <script>{SHARED_JS}
     var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
     var layer = new Konva.Layer();
@@ -263,7 +264,7 @@ def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
   <div id="stage"></div>
   <div class="title">{scene.title}</div>
   <div class="bullets">{bullets_html}</div>
-  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script src="file:///app/vendor/konva.min.js"></script>
   <script>{SHARED_JS}
     var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
     var layer = new Konva.Layer();
@@ -317,7 +318,7 @@ def _build_legacy_simple_html(scene: SceneEvent) -> str:
   <div id="stage"></div>
   <div class="title">{scene.title}</div>
   <div class="bullets">{bullets_html}</div>
-  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script src="file:///app/vendor/konva.min.js"></script>
   <script>
     var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
     var layer = new Konva.Layer();
@@ -341,12 +342,21 @@ def _build_html(scene: SceneEvent, duration: float) -> str:
 class KonvaSceneEngine:
     name = "konva_scene"
 
-    async def resolve_scene(self, scene: SceneEvent, project_id: str) -> str:
+    async def resolve_scene(self, scene: SceneEvent, project_id: str, duration_override: float | None = None) -> str:
+        """duration_override, when given, is the ACTUAL final on-screen
+        duration this scene will play for in the composited video
+        (accounting for gap-closing between scenes) — recording for
+        exactly this length means the clip never needs to be looped at
+        render time. Looping was the cause of a real bug: every loop
+        restart replayed the recording's own brief startup flash (blank
+        white page, then black body background, before Konva's first
+        paint), which showed up as a jarring flicker partway through a
+        scene's display time."""
         settings = get_settings()
         out_dir = Path(settings.assets_dir) / project_id / "konva_scenes" / scene.segment_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        duration = max(scene.end - scene.start, 0.5)
+        duration = duration_override if duration_override and duration_override > 0 else max(scene.end - scene.start, 0.5)
         html_path = out_dir / "scene.html"
         html_path.write_text(_build_html(scene, duration))
 
@@ -362,8 +372,29 @@ class KonvaSceneEngine:
                 viewport={"width": HALF_WIDTH, "height": HALF_HEIGHT},
             )
             page = await context.new_page()
+            console_errors = []
+            page.on("console", lambda msg: console_errors.append(f"[{msg.type}] {msg.text}") if msg.type == "error" else None)
+            page.on("pageerror", lambda exc: console_errors.append(f"[pageerror] {exc}"))
+            # Record slightly longer than the requested duration — the
+            # encoded webm can come back a touch shorter than the wait
+            # time due to recorder startup/flush overhead. Without this
+            # buffer, a shortfall would silently trigger the loop
+            # fallback at render time, reintroducing the exact startup
+            # flash (blank page -> body background) this was meant to
+            # eliminate.
+            # Record extra time at both ends: the first ~0.4s of any
+            # fresh browser recording shows a natural startup sequence
+            # (blank tab -> HTML/CSS loads -> Konva paints) that reads as
+            # a flash if displayed — instead of fighting that timing, the
+            # render step below always skips past START_TRIM_SECONDS of
+            # every recording, so the flash is simply never shown.
             await page.goto(f"file://{html_path}")
-            await page.wait_for_timeout(int(duration * 1000))
+            await page.wait_for_timeout(int((duration + START_TRIM_SECONDS + 0.4) * 1000))
+            if console_errors:
+                logger.warning(
+                    "Konva scene segment=%s had %d browser console error(s): %s",
+                    scene.segment_id, len(console_errors), console_errors[:5],
+                )
             await context.close()
             await browser.close()
 

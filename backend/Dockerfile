@@ -22,6 +22,11 @@ RUN sed -i '/<policy domain="path" rights="none" pattern="@\*"\/>/d' /etc/ImageM
 
 WORKDIR /app
 
+# Bundle Konva locally so scene recordings never depend on a live CDN
+# fetch at render time — network latency there was causing a visible
+# black flash before each scene's first paint.
+RUN mkdir -p /app/vendor && wget -q https://unpkg.com/konva@9/konva.min.js -O /app/vendor/konva.min.js
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium

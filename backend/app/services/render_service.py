@@ -106,14 +106,40 @@ async def resolve_visual_assets(timeline: Timeline) -> dict[str, str]:
     return resolved
 
 
-async def resolve_scene_assets(timeline: Timeline) -> dict[str, str]:
+def _compute_scene_display_durations(timeline: Timeline, cut_plan: "CutPlan") -> dict[str, float]:
+    """The ACTUAL final on-screen duration each scene will play for,
+    accounting for gap-closing between consecutive scenes — mirrors the
+    timing logic in _build_split_layout_clips. Computed up front so the
+    Konva engine can record each scene for exactly this length, instead
+    of looping a shorter recording (which caused a startup-flash flicker
+    every time it looped)."""
+    entries = []
+    for scene in timeline.scene_events:
+        shift = cut_plan.shift_for_segment(scene.segment_id)
+        new_start = max(scene.start + shift, 0.0)
+        entries.append((new_start, scene))
+    entries.sort(key=lambda e: e[0])
+
+    durations: dict[str, float] = {}
+    for idx, (new_start, scene) in enumerate(entries):
+        if idx + 1 < len(entries):
+            duration = max(entries[idx + 1][0] - new_start, 0.3)
+        else:
+            duration = max(cut_plan.total_duration - new_start, max(scene.end - scene.start, 0.5))
+        durations[scene.segment_id] = duration
+    return durations
+
+
+async def resolve_scene_assets(timeline: Timeline, cut_plan: "CutPlan") -> dict[str, str]:
     if timeline.layout != "split_demo" or not timeline.scene_events:
         return {}
     engine = KonvaSceneEngine()
+    display_durations = _compute_scene_display_durations(timeline, cut_plan)
     resolved: dict[str, str] = {}
     for scene in timeline.scene_events:
         try:
-            path = await engine.resolve_scene(scene, timeline.project_id)
+            duration_override = display_durations.get(scene.segment_id)
+            path = await engine.resolve_scene(scene, timeline.project_id, duration_override)
             resolved[scene.segment_id] = path
         except Exception:
             logger.exception(
@@ -393,10 +419,16 @@ def _build_split_layout_clips(
             duration = max(cut_plan.total_duration - new_start, max(scene.end - scene.start, 0.5))
         try:
             clip = VideoFileClip(path).without_audio()
-            if clip.duration < duration:
+            # Always skip the first START_TRIM_SECONDS — that's the
+            # recording's natural startup flash (blank tab -> HTML/CSS
+            # loads -> Konva paints), never the actual intended content.
+            trim_start = 0.4 if clip.duration > duration + 0.4 else 0.0
+            available = clip.duration - trim_start
+            if available < duration:
+                clip = clip.subclip(trim_start, clip.duration)
                 clip = clip.fx(vfx.loop, duration=duration)
             else:
-                clip = clip.subclip(0, duration)
+                clip = clip.subclip(trim_start, trim_start + duration)
             clip = _fit_to_half(clip, half="top")
             clip = clip.set_start(new_start).set_duration(duration)
             clips.append(clip)
@@ -701,6 +733,7 @@ def composite_timeline(
     resolved_assets: dict[str, str],
     scene_assets: dict[str, str],
     output_path: str,
+    precomputed_cut_plan: "CutPlan | None" = None,
 ) -> str:
     logger.info(
         "Compositing timeline for project=%s -> %s (layout=%s, %d visual, %d scene, %d audio, %d cta events)",
@@ -709,7 +742,7 @@ def composite_timeline(
         len(timeline.audio_events), len(timeline.cta_events),
     )
 
-    cut_plan = CutPlan(timeline)
+    cut_plan = precomputed_cut_plan if precomputed_cut_plan is not None else CutPlan(timeline)
 
     if timeline.layout == "split_demo":
         raw_base = _build_cut_base_clip(source_video_path, cut_plan, fit_full=False)
@@ -795,9 +828,13 @@ def render_project_task(project_id: str, timeline_dict: dict, source_video_path:
 
         try:
             resolved_assets = await resolve_visual_assets(timeline)
-            scene_assets = await resolve_scene_assets(timeline)
+            precomputed_cut_plan = CutPlan(timeline)
+            scene_assets = await resolve_scene_assets(timeline, precomputed_cut_plan)
             await resolve_audio_assets(timeline)
-            composite_timeline(timeline, source_video_path, resolved_assets, scene_assets, output_path)
+            composite_timeline(
+                timeline, source_video_path, resolved_assets, scene_assets, output_path,
+                precomputed_cut_plan=precomputed_cut_plan,
+            )
         except Exception as exc:
             logger.exception("Render failed for project=%s", project_id)
             await _mark_project_status(project_id, ProjectStatus.FAILED, error_message=str(exc))
