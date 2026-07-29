@@ -94,7 +94,7 @@ function buildAnimatedBackground(layer, accentHex, W, H) {
 def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
     elements_json = json.dumps(
         [{"text": e.text, "x": e.x_pct / 100.0 * HALF_WIDTH,
-          "y": e.y_pct / 100.0 * HALF_HEIGHT, "revealAt": e.reveal_at}
+          "y": e.y_pct / 100.0 * HALF_HEIGHT, "revealAt": e.reveal_at, "focus": e.focus}
          for e in scene.elements]
     )
     connections_json = json.dumps(scene.connections)
@@ -118,6 +118,9 @@ def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
     var accent = "{scene.accent_color}";
     buildAnimatedBackground(layer, accent, {HALF_WIDTH}, {HALF_HEIGHT});
 
+    var camera = new Konva.Group({{ x: 0, y: 0, scaleX: 1, scaleY: 1 }});
+    layer.add(camera);
+
     var elements = {elements_json};
     var connections = {connections_json};
     var totalDuration = {duration_ms};
@@ -134,7 +137,7 @@ def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
       }});
       group.add(glow);
       group.add(label);
-      layer.add(group);
+      camera.add(group);
       nodePositions.push({{ x: el.x, y: el.y }});
 
       setTimeout(function() {{
@@ -153,7 +156,8 @@ def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
         points: [a.x, a.y, a.x, a.y], stroke: accent, strokeWidth: 4, opacity: 0,
         shadowColor: accent, shadowBlur: 15, shadowOpacity: 0.7, lineCap: "round",
       }});
-      layer.add(line);
+      camera.add(line);
+      line.moveToBottom();
       var revealAt = Math.max(elements[pair[0]].revealAt, elements[pair[1]].revealAt) * totalDuration + 250;
       setTimeout(function() {{
         line.opacity(0.8);
@@ -163,6 +167,57 @@ def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
         }}).play();
       }}, revealAt);
     }});
+
+    var lastRevealMs = elements.length
+      ? Math.max.apply(null, elements.map(function(e) {{ return e.revealAt * totalDuration; }}))
+      : 0;
+    var focusStart = lastRevealMs + 500;
+    var focusElements = elements.filter(function(e) {{ return e.focus; }});
+    var focusWindow = Math.max(totalDuration - focusStart, 0);
+
+    if (focusElements.length && focusWindow > 800) {{
+      var perFocus = focusWindow / focusElements.length;
+      var ZOOM_SCALE = 1.7;
+
+      focusElements.forEach(function(el, i) {{
+        var stepStart = focusStart + i * perFocus;
+        var targetX = {HALF_WIDTH} / 2 - el.x * ZOOM_SCALE;
+        var targetY = {HALF_HEIGHT} / 2 - el.y * ZOOM_SCALE;
+
+        setTimeout(function() {{
+          new Konva.Tween({{
+            node: camera, duration: 0.5, scaleX: ZOOM_SCALE, scaleY: ZOOM_SCALE,
+            x: targetX, y: targetY, easing: Konva.Easings.EaseInOut,
+          }}).play();
+
+          setTimeout(function() {{
+            var pts = [];
+            var steps = 24;
+            var radius = 55;
+            for (var s = 0; s <= steps; s++) {{
+              var ang = (s / steps) * Math.PI * 2;
+              var jitter = (Math.random() - 0.5) * 8;
+              pts.push(el.x + Math.cos(ang) * (radius + jitter));
+              pts.push(el.y + Math.sin(ang) * (radius + jitter));
+            }}
+            var mark = new Konva.Line({{
+              points: pts, stroke: "#FF5C5C", strokeWidth: 5, opacity: 0,
+              lineCap: "round", lineJoin: "round", closed: true, tension: 0.6,
+              shadowColor: "#FF5C5C", shadowBlur: 10, shadowOpacity: 0.5,
+            }});
+            camera.add(mark);
+            mark.to({{ opacity: 0.9, duration: 0.25 }});
+          }}, 350);
+        }}, stepStart);
+      }});
+
+      setTimeout(function() {{
+        new Konva.Tween({{
+          node: camera, duration: 0.5, scaleX: 1, scaleY: 1, x: 0, y: 0,
+          easing: Konva.Easings.EaseInOut,
+        }}).play();
+      }}, Math.max(totalDuration - 500, focusStart));
+    }}
 
     stage.add(layer);
   </script>

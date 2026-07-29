@@ -79,12 +79,18 @@ class SceneElement(BaseModel):
     is given as a percentage (0-100) of the top-half frame, so the Konva
     template can place it regardless of exact pixel resolution.
     reveal_at is a 0.0-1.0 fraction of the scene's own duration — when
-    this element animates in relative to the scene's start."""
+    this element animates in relative to the scene's start.
+    focus, when true, means this specific node gets a camera zoom-in +
+    hand-drawn pencil-circle annotation once all nodes have appeared —
+    used to visually call out whichever node is being discussed at that
+    moment, similar to how a presenter zooms into and circles part of a
+    whiteboard while explaining it."""
 
     text: str
     x_pct: float = 50.0
     y_pct: float = 50.0
     reveal_at: float = 0.0
+    focus: bool = False
 
 
 class SceneEvent(BaseModel):

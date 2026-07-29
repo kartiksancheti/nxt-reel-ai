@@ -51,10 +51,17 @@ static or plain:
   - "diagram": the script ENUMERATES distinct steps or options (e.g.
     "lead entry, contract creation, follow-ups", any list of 2-4 named
     things). Provide "elements": a list of {"text": short label,
-    "x_pct": 0-100, "y_pct": 0-100, "reveal_at": 0.0-1.0} positioned
-    sensibly (stacked vertically or arranged left-to-right), with
-    "reveal_at" staggered (0.0, 0.33, 0.66 for 3) so they appear in
-    sequence. Optionally "connections": [index,index] pairs to draw a
+    "x_pct": 0-100, "y_pct": 0-100, "reveal_at": 0.0-1.0, "focus": bool}
+    positioned sensibly (stacked vertically or arranged left-to-right),
+    with "reveal_at" staggered (0.0, 0.33, 0.66 for 3) so they appear in
+    sequence. Set "focus": true on an element if there's enough time
+    left in the scene AFTER all elements have appeared for the camera to
+    zoom in and circle it — this reads like the speaker zooming into and
+    marking one part of a whiteboard diagram while explaining it. Only
+    mark elements as focus if the scene is long enough (roughly 2+
+    seconds after the last reveal) to actually show this — for short
+    scenes, leave focus false on everything and just let the nodes
+    appear. Optionally "connections": [index,index] pairs to draw a
     glowing line between related nodes. Include "title" and
     "accent_color" (hex).
 
@@ -155,6 +162,7 @@ def run_scene_designer(segments: list[Segment], treatment: str | None = None) ->
                             x_pct=max(0.0, min(100.0, float(el.get("x_pct", 50.0)))),
                             y_pct=max(0.0, min(100.0, float(el.get("y_pct", 50.0)))),
                             reveal_at=max(0.0, min(1.0, float(el.get("reveal_at", 0.0)))),
+                            focus=bool(el.get("focus", False)),
                         )
                     )
                 except (TypeError, ValueError):
