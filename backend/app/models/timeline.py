@@ -130,8 +130,9 @@ class SceneEvent(BaseModel):
     compare_label: str = ""  # label for the second number
 
     # "dynamic" fields
-    mood: str = "illustration"  # illustration | icons | typography
+    mood: str = "illustration"  # illustration | icons | typography | lottie
     icons: list[str] = Field(default_factory=list)  # icon names for mood="icons", e.g. ["chat", "clock"]
+    lottie_name: str = ""  # animation name for mood="lottie", e.g. "checkmark" (see backend/vendor/lottie_animations/)
 
 
 class AudioEvent(BaseModel):

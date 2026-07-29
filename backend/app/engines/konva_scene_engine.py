@@ -150,6 +150,41 @@ function makeIcon(type, x, y, size, color) {
   }
   return g;
 }
+
+// Reveals a line of text word-by-word, each word popping in with a
+// scale/rotation bounce, instead of the whole line fading in as one
+// static block — this is what makes titles read as animation rather
+// than text sitting on top of animation.
+function revealWordsKinetic(layer, text, x, y, fontSize, color, maxWidth, startDelayMs, shadowColor) {
+  var words = text.split(" ");
+  var cursorX = x;
+  var lineHeight = fontSize * 1.15;
+  var cursorY = y;
+  words.forEach(function(word, i) {
+    var probe = new Konva.Text({ text: word + " ", fontSize: fontSize, fontStyle: "900" });
+    var wordWidth = probe.width();
+    if (cursorX + wordWidth > x + maxWidth) {
+      cursorX = x;
+      cursorY += lineHeight;
+    }
+    var t = new Konva.Text({
+      x: cursorX, y: cursorY, text: word, fontSize: fontSize, fontStyle: "900",
+      fill: color, shadowColor: shadowColor || "#000", shadowBlur: 12, shadowOpacity: 0.6,
+      opacity: 0, scaleX: 0.4, scaleY: 0.4, rotation: -8,
+    });
+    layer.add(t);
+    (function(node, delay) {
+      setTimeout(function() {
+        node.to({
+          opacity: 1, scaleX: 1, scaleY: 1, rotation: 0, duration: 0.4,
+          easing: Konva.Easings.BackEaseOut,
+        });
+      }, delay);
+    })(t, startDelayMs + i * 120);
+    cursorX += wordWidth;
+  });
+  return cursorY + lineHeight;
+}
 """
 
 
@@ -457,20 +492,40 @@ def _build_counter_html(scene: SceneEvent, duration: float) -> str:
 </body></html>"""
 
 
+LOTTIE_DIR = Path("/app/vendor/lottie_animations")
+
+
 def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
-    bullets_html = "".join(f'<div class="bullet">{b}</div>' for b in scene.bullets[:3])
     duration_ms = int(max(duration, 0.5) * 1000)
-    mood = scene.mood if scene.mood in ("illustration", "icons", "typography") else "illustration"
+    mood = scene.mood if scene.mood in ("illustration", "icons", "typography", "lottie") else "illustration"
+
+    # Lottie mood needs the actual JSON file to exist on disk (it's an
+    # optional, user-supplied asset — see backend/vendor/lottie_animations/
+    # README). If it's missing, fall back to "illustration" rather than
+    # ever breaking a render over an absent file.
+    lottie_path = LOTTIE_DIR / f"{scene.lottie_name}.json" if scene.lottie_name else None
+    if mood == "lottie" and (not lottie_path or not lottie_path.exists()):
+        mood = "illustration"
+
     icons_json = json.dumps(scene.icons[:3] if scene.icons else ["gear"])
+    title_json = json.dumps(scene.title)
+    bullets_json = json.dumps(scene.bullets[:3])
+
+    # Title is always kinetic word-by-word (via revealWordsKinetic), never
+    # a static HTML block sitting on top of the animation — this is what
+    # makes the text itself part of the motion instead of competing with it.
+    title_js = f"""
+    var titleY = revealWordsKinetic(layer, {title_json}, 60, 60, 54, "#fff", {HALF_WIDTH} - 120, 100, accent);
+"""
 
     if mood == "icons":
-        js_body = f"""
+        js_body = title_js + f"""
     var iconNames = {icons_json};
     var iconColor = accent;
     var positions = [
-      {{ x: {HALF_WIDTH} * 0.72, y: {HALF_HEIGHT} * 0.42 }},
-      {{ x: {HALF_WIDTH} * 0.85, y: {HALF_HEIGHT} * 0.68 }},
-      {{ x: {HALF_WIDTH} * 0.60, y: {HALF_HEIGHT} * 0.75 }},
+      {{ x: {HALF_WIDTH} * 0.72, y: {HALF_HEIGHT} * 0.55 }},
+      {{ x: {HALF_WIDTH} * 0.85, y: {HALF_HEIGHT} * 0.78 }},
+      {{ x: {HALF_WIDTH} * 0.60, y: {HALF_HEIGHT} * 0.82 }},
     ];
     iconNames.forEach(function(name, i) {{
       var pos = positions[i % positions.length];
@@ -491,34 +546,39 @@ def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
           }}
           setTimeout(pulseLoop, 500);
         }}, delay);
-      }})(icon, 300 + i * 250);
+      }})(icon, 500 + i * 250);
     }});
     stage.add(layer);
 """
     elif mood == "typography":
         js_body = f"""
-    var titleText = new Konva.Text({{
-      x: 60, y: {HALF_HEIGHT} * 0.38, width: {HALF_WIDTH} - 120,
-      text: "{scene.title}", fontSize: 88, fontStyle: "900", fill: "#fff",
-      shadowColor: accent, shadowBlur: 30, shadowOpacity: 0.9,
-      opacity: 0, scaleX: 0.85, scaleY: 0.85,
-    }});
-    layer.add(titleText);
+    revealWordsKinetic(layer, {title_json}, 60, {HALF_HEIGHT} * 0.38, 84, "#fff", {HALF_WIDTH} - 120, 100, accent);
     stage.add(layer);
-    titleText.to({{
-      opacity: 1, scaleX: 1, scaleY: 1, duration: 0.6, easing: Konva.Easings.BackEaseOut,
-    }});
     var underline = new Konva.Rect({{
-      x: 64, y: {HALF_HEIGHT} * 0.38 + 100, width: 0, height: 8,
+      x: 64, y: {HALF_HEIGHT} * 0.38 + 190, width: 0, height: 8,
       fill: accent, shadowColor: accent, shadowBlur: 15, shadowOpacity: 0.8,
     }});
     layer.add(underline);
     setTimeout(function() {{
       underline.to({{ width: 260, duration: 0.5, easing: Konva.Easings.EaseOut }});
-    }}, 400);
+    }}, 900);
+"""
+    elif mood == "lottie":
+        js_body = title_js + """
+    stage.add(layer);
 """
     else:  # illustration
-        js_body = f"""
+        js_body = title_js + f"""
+    var bullets = {bullets_json};
+    var bulletY = 240;
+    bullets.forEach(function(bullet, bi) {{
+      (function(text, y, delay) {{
+        setTimeout(function() {{
+          revealWordsKinetic(layer, text, 70, y, 34, "#fff", {HALF_WIDTH} - 140, 0, accent);
+        }}, delay);
+      }})(bullet, bulletY + bi * 60, 700 + bi * 350);
+    }});
+
     var pulses = [];
     for (var i = 0; i < 3; i++) {{
       var pc = new Konva.Circle({{
@@ -544,32 +604,33 @@ def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
     stage.add(layer);
 """
 
-    title_html = "" if mood == "typography" else f'<div class="title">{scene.title}</div>'
+    lottie_overlay_html = ""
+    lottie_script = ""
+    if mood == "lottie" and lottie_path and lottie_path.exists():
+        lottie_overlay_html = (
+            f'<div id="lottie-box" style="position:absolute; right:40px; bottom:60px; '
+            f'width:420px; height:420px; z-index:3;"></div>'
+        )
+        raw_animation_json = lottie_path.read_text().replace("</script", "<\\/script")
+        lottie_script = f"""
+    lottie.loadAnimation({{
+      container: document.getElementById('lottie-box'),
+      renderer: 'svg', loop: true, autoplay: true,
+      animationData: {raw_animation_json},
+    }});
+"""
 
     return f"""<!DOCTYPE html>
 <html><head><style>
   body {{ margin:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px; overflow:hidden;
           font-family:'Arial', sans-serif; background:#0a0a10; }}
   #stage {{ position:absolute; top:0; left:0; }}
-  .title {{ position:absolute; top:70px; left:60px; font-size:58px; font-weight:800;
-             color:#fff; max-width:900px; z-index:2; text-shadow: 0 0 20px rgba(0,0,0,0.6);
-             opacity:0; animation: fadeSlide 0.6s ease-out 0.1s forwards; }}
-  .bullets {{ position:absolute; top:250px; left:70px; z-index:2; }}
-  .bullet {{ font-size:36px; opacity:0; color:#fff; margin-top:16px;
-              animation: fadeSlide 0.5s ease-out forwards; text-shadow: 0 0 12px rgba(0,0,0,0.6); }}
-  .bullet:nth-child(1) {{ animation-delay: 0.35s; }}
-  .bullet:nth-child(2) {{ animation-delay: 0.55s; }}
-  .bullet:nth-child(3) {{ animation-delay: 0.75s; }}
-  @keyframes fadeSlide {{
-    from {{ opacity: 0; transform: translateX(-30px); }}
-    to {{ opacity: 1; transform: translateX(0); }}
-  }}
 </style></head>
 <body>
   <div id="stage"></div>
-  {title_html}
-  <div class="bullets">{bullets_html}</div>
+  {lottie_overlay_html}
   <script src="file:///app/vendor/konva.min.js"></script>
+  <script src="file:///app/vendor/lottie.min.js"></script>
   <script>{SHARED_JS}
     var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
     var layer = new Konva.Layer();
@@ -577,6 +638,7 @@ def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
     buildAnimatedBackground(layer, accent, {HALF_WIDTH}, {HALF_HEIGHT});
 {js_body}
   </script>
+  <script>{lottie_script}</script>
 </body></html>"""
 
 

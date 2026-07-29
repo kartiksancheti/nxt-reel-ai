@@ -394,35 +394,43 @@ def _build_visual_overlay_clips(
 
 
 def _build_split_layout_clips(
-    timeline: Timeline, scene_assets: dict[str, str], cut_plan: CutPlan
+    timeline: Timeline, scene_assets: dict[str, str], cut_plan: CutPlan,
+    segment_clip_overrides: dict[str, str] | None = None,
 ) -> list:
-    """Top-half Konva scene clips for the split_demo layout. Each scene's
-    on-screen duration is extended to run right up until the NEXT scene
-    starts (or to the end of the video for the last one) — closing the
-    small gaps CutPlan leaves between cut ranges, which previously left
-    a brief black/empty top-half flash between every scene transition."""
+    """Top-half clips for the split_demo layout. Each scene's on-screen
+    duration is extended to run right up until the NEXT scene starts (or
+    to the end of the video for the last one) — closing the small gaps
+    CutPlan leaves between cut ranges, which previously left a brief
+    black/empty top-half flash between every scene transition.
+
+    If the person uploaded their OWN clip for a segment (a real
+    dashboard/chat demo recording, a manually-generated AI video, etc.),
+    that clip is used INSTEAD of the Konva/Lottie scene for that moment —
+    segment_clip_overrides takes priority over scene_assets."""
+    overrides = segment_clip_overrides or {}
     entries = []
     for scene in timeline.scene_events:
-        path = scene_assets.get(scene.segment_id)
+        override_path = overrides.get(scene.segment_id)
+        path = override_path or scene_assets.get(scene.segment_id)
         if not path:
             continue
         shift = cut_plan.shift_for_segment(scene.segment_id)
         new_start = max(scene.start + shift, 0.0)
-        entries.append((new_start, scene, path))
+        entries.append((new_start, scene, path, bool(override_path)))
     entries.sort(key=lambda e: e[0])
 
     clips = []
-    for idx, (new_start, scene, path) in enumerate(entries):
+    for idx, (new_start, scene, path, is_override) in enumerate(entries):
         if idx + 1 < len(entries):
             duration = max(entries[idx + 1][0] - new_start, 0.3)
         else:
             duration = max(cut_plan.total_duration - new_start, max(scene.end - scene.start, 0.5))
         try:
             clip = VideoFileClip(path).without_audio()
-            # Always skip the first START_TRIM_SECONDS — that's the
-            # recording's natural startup flash (blank tab -> HTML/CSS
-            # loads -> Konva paints), never the actual intended content.
-            trim_start = 0.4 if clip.duration > duration + 0.4 else 0.0
+            # User-uploaded override clips are real footage, not a fresh
+            # Konva/Playwright recording — they never have the browser
+            # startup-flash artifact, so skip the trim entirely for them.
+            trim_start = 0.0 if is_override else (0.4 if clip.duration > duration + 0.4 else 0.0)
             available = clip.duration - trim_start
             if available < duration:
                 clip = clip.subclip(trim_start, clip.duration)
@@ -734,6 +742,7 @@ def composite_timeline(
     scene_assets: dict[str, str],
     output_path: str,
     precomputed_cut_plan: "CutPlan | None" = None,
+    segment_clip_overrides: dict[str, str] | None = None,
 ) -> str:
     logger.info(
         "Compositing timeline for project=%s -> %s (layout=%s, %d visual, %d scene, %d audio, %d cta events)",
@@ -749,7 +758,7 @@ def composite_timeline(
         raw_base = raw_base.set_duration(min(raw_base.duration, cut_plan.total_duration or raw_base.duration))
         base = _fit_to_half(raw_base, half="bottom").set_duration(raw_base.duration)
         layers = [base]
-        layers.extend(_build_split_layout_clips(timeline, scene_assets, cut_plan))
+        layers.extend(_build_split_layout_clips(timeline, scene_assets, cut_plan, segment_clip_overrides))
     else:
         base = _build_cut_base_clip(source_video_path, cut_plan)
         base = base.set_duration(min(base.duration, cut_plan.total_duration or base.duration))
@@ -815,7 +824,10 @@ async def _mark_project_status(
 
 
 @celery_app.task(name="render_project")
-def render_project_task(project_id: str, timeline_dict: dict, source_video_path: str) -> str:
+def render_project_task(
+    project_id: str, timeline_dict: dict, source_video_path: str,
+    segment_clip_overrides: dict[str, str] | None = None,
+) -> str:
     import asyncio
 
     async def _run() -> str:
@@ -834,6 +846,7 @@ def render_project_task(project_id: str, timeline_dict: dict, source_video_path:
             composite_timeline(
                 timeline, source_video_path, resolved_assets, scene_assets, output_path,
                 precomputed_cut_plan=precomputed_cut_plan,
+                segment_clip_overrides=segment_clip_overrides,
             )
         except Exception as exc:
             logger.exception("Render failed for project=%s", project_id)

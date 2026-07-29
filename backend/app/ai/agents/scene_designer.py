@@ -37,10 +37,14 @@ logger = logging.getLogger(__name__)
 
 VALID_LAYOUT_TYPES = {"diagram", "counter", "dynamic", "simple"}  # "simple" kept for legacy scenes only
 VALID_COUNTER_STYLES = {"ring", "bar", "compare"}
-VALID_MOODS = {"illustration", "icons", "typography"}
+VALID_MOODS = {"illustration", "icons", "typography", "lottie"}
 VALID_ICONS = {
     "checkmark", "clock", "chat", "arrow", "folder", "person",
     "warning", "money", "phone", "gear", "calendar", "bell",
+}
+VALID_LOTTIE_NAMES = {
+    "checkmark", "loading", "success_burst", "arrow_flow",
+    "chat_pop", "warning_pulse", "growth_chart", "gear_spin",
 }
 
 SYSTEM_PROMPT = """\
@@ -97,9 +101,24 @@ static or plain:
         automation).
       - "typography": bold, large kinetic text, minimal decoration —
         good for a single sharp, quotable line
+      - "lottie": a polished, pre-made motion-design animation — use
+        this when one of these EXACT names genuinely fits the moment
+        (only use a name from this list, never invent one):
+          - "checkmark": a success/completion/solution moment
+          - "loading": a waiting/processing/in-progress moment
+          - "success_burst": a big win/achievement/celebration moment
+          - "arrow_flow": a process/pipeline/step-by-step moment
+          - "chat_pop": a messaging/communication/notification moment
+          - "warning_pulse": a problem/risk/mistake moment
+          - "growth_chart": a growth/increase/improvement moment
+          - "gear_spin": an automation/systems/technical moment
+        Provide "lottie_name" with one of these exact names. If none of
+        them genuinely fit, do NOT use "lottie" — pick "illustration",
+        "icons", or "typography" instead.
 
     Vary mood and icons across consecutive dynamic scenes — avoid
-    repeating the same mood/icon back to back unless content repeats.
+    repeating the same mood/icon/lottie_name back to back unless content
+    repeats.
 
 Decide, using your own judgment based on the script, whether consecutive
 segments should read as ONE continuous evolving graphic (reuse the same
@@ -206,6 +225,9 @@ def run_scene_designer(segments: list[Segment], treatment: str | None = None) ->
             counter_style = raw.get("counter_style") if raw.get("counter_style") in VALID_COUNTER_STYLES else "ring"
             mood = raw.get("mood") if raw.get("mood") in VALID_MOODS else "illustration"
             icons = [i for i in raw.get("icons", []) if i in VALID_ICONS][:3]
+            lottie_name = raw.get("lottie_name") if raw.get("lottie_name") in VALID_LOTTIE_NAMES else ""
+            if mood == "lottie" and not lottie_name:
+                mood = "illustration"  # AI said lottie but gave no valid name — fall back safely
 
             scenes.append(
                 SceneEvent(
@@ -226,6 +248,7 @@ def run_scene_designer(segments: list[Segment], treatment: str | None = None) ->
                     compare_label=str(raw.get("compare_label", ""))[:30],
                     mood=mood,
                     icons=icons,
+                    lottie_name=lottie_name,
                 )
             )
         logger.info(

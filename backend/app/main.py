@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import content, export, project, render, timeline, transcribe, upload
+from app.api.routes import content, export, project, render, segment_clips, timeline, transcribe, upload
 from app.core.logging import configure_logging
 from app.db.models import Base
 from app.db.session import engine
@@ -32,6 +32,7 @@ app.include_router(render.router)
 app.include_router(export.router)
 app.include_router(project.router)
 app.include_router(content.router)
+app.include_router(segment_clips.router)
 
 
 @app.get("/health")

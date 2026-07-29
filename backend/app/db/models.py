@@ -37,6 +37,7 @@ class Project(Base):
     timeline_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     creative_treatment: Mapped[str | None] = mapped_column(String, nullable=True)
     caption_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    segment_clip_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {segment_id: file_path} — user's own footage for specific segments
     rendered_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     exported_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
