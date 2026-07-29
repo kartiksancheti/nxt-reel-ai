@@ -36,6 +36,12 @@ from app.models.timeline import Segment, SceneEvent, SceneElement
 logger = logging.getLogger(__name__)
 
 VALID_LAYOUT_TYPES = {"diagram", "counter", "dynamic", "simple"}  # "simple" kept for legacy scenes only
+VALID_COUNTER_STYLES = {"ring", "bar", "compare"}
+VALID_MOODS = {"illustration", "icons", "typography"}
+VALID_ICONS = {
+    "checkmark", "clock", "chat", "arrow", "folder", "person",
+    "warning", "money", "phone", "gear", "calendar", "bell",
+}
 
 SYSTEM_PROMPT = """\
 You are the Scene Designer for a split-screen short-form video: the TOP
@@ -66,18 +72,34 @@ static or plain:
     "accent_color" (hex).
 
   - "counter": the moment is about ONE specific stat/number. Provide
-    "counter_value" (e.g. "92%", "30", "$10K") and "counter_label" (a
-    few words, e.g. "days" or "of creators skip this"), plus "title"
-    and "accent_color".
+    "counter_value" (e.g. "92%", "30", "$10K"), "counter_label" (a few
+    words, e.g. "days" or "of creators skip this"), "title",
+    "accent_color", and "counter_style" — pick whichever best fits:
+      - "ring": a sweeping progress ring around the number (percentages,
+        progress-toward-goal)
+      - "bar": a horizontal bar filling up ("X out of Y", capacity)
+      - "compare": two numbers side by side (before/after, old-vs-new)
+        — also provide "compare_value" and "compare_label"
 
   - "dynamic": everything else — one idea/statement that isn't a list
     or a single stat. Provide "title" (max 6 words, punchy, never
     verbatim transcript), 0-3 "bullets" (max 5 words each, optional —
-    omit if the title alone carries it), and "accent_color". This scene
-    type always renders as a living, moving graphic (animated gradient
-    background + drifting glowing shapes) — never flat or static, so
-    don't worry about describing motion yourself, just give strong
-    content.
+    omit if the title alone carries it), "accent_color", and "mood" —
+    pick whichever best fits this moment:
+      - "illustration": animated gradient background with drifting
+        glowing abstract shapes — good general-purpose default
+      - "icons": 1-3 relevant icons animate in and pulse, chosen from:
+        checkmark, clock, chat, arrow, folder, person, warning, money,
+        phone, gear, calendar, bell. Provide "icons": 1-3 names from
+        that list, picked for actual relevance (e.g. "chat" for
+        messaging, "clock" for delay, "warning" for a problem,
+        "checkmark" for success, "money" for cost, "gear" for
+        automation).
+      - "typography": bold, large kinetic text, minimal decoration —
+        good for a single sharp, quotable line
+
+    Vary mood and icons across consecutive dynamic scenes — avoid
+    repeating the same mood/icon back to back unless content repeats.
 
 Decide, using your own judgment based on the script, whether consecutive
 segments should read as ONE continuous evolving graphic (reuse the same
@@ -181,6 +203,10 @@ def run_scene_designer(segments: list[Segment], treatment: str | None = None) ->
             if layout_type == "diagram" and not elements:
                 layout_type = "dynamic"  # no usable elements — fall back to the animated dynamic template
 
+            counter_style = raw.get("counter_style") if raw.get("counter_style") in VALID_COUNTER_STYLES else "ring"
+            mood = raw.get("mood") if raw.get("mood") in VALID_MOODS else "illustration"
+            icons = [i for i in raw.get("icons", []) if i in VALID_ICONS][:3]
+
             scenes.append(
                 SceneEvent(
                     segment_id=segment.id,
@@ -195,6 +221,11 @@ def run_scene_designer(segments: list[Segment], treatment: str | None = None) ->
                     connections=connections,
                     counter_value=str(raw.get("counter_value", ""))[:12],
                     counter_label=str(raw.get("counter_label", ""))[:30],
+                    counter_style=counter_style,
+                    compare_value=str(raw.get("compare_value", ""))[:12],
+                    compare_label=str(raw.get("compare_label", ""))[:30],
+                    mood=mood,
+                    icons=icons,
                 )
             )
         logger.info(

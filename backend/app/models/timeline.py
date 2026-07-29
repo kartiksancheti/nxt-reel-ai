@@ -117,12 +117,21 @@ class SceneEvent(BaseModel):
     layout_type: str = "simple"  # simple | diagram | counter
     title: str = ""
     bullets: list[str] = Field(default_factory=list)
-    shape: str = "circle"  # circle | arrow | checklist | flow (used by "simple" only)
+    shape: str = "circle"  # circle | arrow | checklist | flow (used by legacy "simple" only)
     accent_color: str = "#4EA8FF"
     elements: list[SceneElement] = Field(default_factory=list)  # used by "diagram"
     connections: list[list[int]] = Field(default_factory=list)  # used by "diagram"
-    counter_value: str = ""  # used by "counter", e.g. "92%" or "30"
-    counter_label: str = ""  # used by "counter", e.g. "days"
+
+    # "counter" fields
+    counter_value: str = ""  # e.g. "92%" or "30"
+    counter_label: str = ""  # e.g. "days"
+    counter_style: str = "ring"  # ring | bar | compare
+    compare_value: str = ""  # second number, used only when counter_style="compare"
+    compare_label: str = ""  # label for the second number
+
+    # "dynamic" fields
+    mood: str = "illustration"  # illustration | icons | typography
+    icons: list[str] = Field(default_factory=list)  # icon names for mood="icons", e.g. ["chat", "clock"]
 
 
 class AudioEvent(BaseModel):

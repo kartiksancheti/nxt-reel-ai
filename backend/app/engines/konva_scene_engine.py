@@ -10,15 +10,20 @@ Every template is animated, never static:
     via Konva.Animation) + slow-drifting glowing particle shapes
   - "diagram": nodes bounce-scale in on reveal, with a glowing dot and
     label; connecting lines draw themselves (tweened points) with a
-    glow stroke
-  - "counter": a big number counts up while a glowing radial progress
-    ring sweeps around it in sync
-  - "dynamic": animated gradient background + several drifting, pulsing
-    glow shapes + title/bullets fading and sliding in
+    glow stroke; nodes marked "focus" get a camera zoom-in + hand-drawn
+    pencil-circle annotation
+  - "counter": a big number, in one of three presentation styles
+    (sweeping ring / filling bar / side-by-side compare) picked per
+    scene based on what the stat represents
+  - "dynamic": one of three moods (drifting abstract shapes / relevant
+    animated icons / bold kinetic typography) picked per scene so
+    consecutive moments don't all look identical
 
 Uses real Konva capabilities: fillLinearGradientColorStops animation,
 shadowBlur/shadowColor for glow, Konva.Easings (including Bounce),
-Konva.Arc for the progress ring, Konva.Tween for line/point animation.
+Konva.Arc for rings, Konva.Tween for animation, a small self-contained
+icon library built from plain Konva primitives (no external image
+assets needed).
 """
 import json
 import logging
@@ -87,6 +92,63 @@ function buildAnimatedBackground(layer, accentHex, W, H) {
   }, layer);
   particleAnim.start();
   bg.moveToBottom();
+}
+
+// Draws one icon (returns a Konva.Group) at (x, y) with given size/color.
+// Every icon is built from plain Konva primitives — no external image
+// assets — so the whole library stays self-contained and fast to render.
+function makeIcon(type, x, y, size, color) {
+  var g = new Konva.Group({ x: x, y: y });
+  var s = size;
+  var opts = { stroke: color, strokeWidth: s * 0.09, lineCap: "round", lineJoin: "round" };
+
+  if (type === "checkmark") {
+    g.add(new Konva.Line({ points: [-s*0.3, 0, -s*0.08, s*0.25, s*0.35, -s*0.3], ...opts }));
+  } else if (type === "clock") {
+    g.add(new Konva.Circle({ radius: s*0.5, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [0, 0, 0, -s*0.3], ...opts }));
+    g.add(new Konva.Line({ points: [0, 0, s*0.22, s*0.08], ...opts }));
+  } else if (type === "chat") {
+    g.add(new Konva.Rect({ x: -s*0.5, y: -s*0.35, width: s, height: s*0.6, cornerRadius: s*0.12, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [-s*0.15, s*0.25, -s*0.3, s*0.5, 0, s*0.25], closed: true, fill: color }));
+  } else if (type === "arrow") {
+    g.add(new Konva.Arrow({ points: [-s*0.4, 0, s*0.4, 0], stroke: color, fill: color, strokeWidth: s*0.1, pointerLength: s*0.25, pointerWidth: s*0.25 }));
+  } else if (type === "folder") {
+    g.add(new Konva.Rect({ x: -s*0.5, y: -s*0.25, width: s, height: s*0.55, cornerRadius: s*0.06, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [-s*0.5, -s*0.25, -s*0.3, -s*0.4, -s*0.05, -s*0.4, s*0.05, -s*0.25], ...opts }));
+  } else if (type === "person") {
+    g.add(new Konva.Circle({ y: -s*0.22, radius: s*0.2, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Arc({ y: s*0.15, innerRadius: 0, outerRadius: s*0.4, angle: 180, rotation: 180, stroke: color, strokeWidth: s*0.08 }));
+  } else if (type === "warning") {
+    g.add(new Konva.Line({ points: [0, -s*0.45, s*0.45, s*0.35, -s*0.45, s*0.35], closed: true, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [0, -s*0.12, 0, s*0.1], ...opts }));
+    g.add(new Konva.Circle({ y: s*0.22, radius: s*0.035, fill: color }));
+  } else if (type === "money") {
+    g.add(new Konva.Circle({ radius: s*0.5, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Text({ text: "$", fontSize: s*0.6, fontStyle: "bold", fill: color, x: -s*0.16, y: -s*0.32 }));
+  } else if (type === "phone") {
+    g.add(new Konva.Rect({ x: -s*0.28, y: -s*0.5, width: s*0.56, height: s, cornerRadius: s*0.1, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [-s*0.1, s*0.38, s*0.1, s*0.38], ...opts }));
+  } else if (type === "gear") {
+    g.add(new Konva.Circle({ radius: s*0.4, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Circle({ radius: s*0.14, stroke: color, strokeWidth: s*0.08 }));
+    for (var gi = 0; gi < 6; gi++) {
+      var ang = (gi / 6) * Math.PI * 2;
+      g.add(new Konva.Line({
+        points: [Math.cos(ang)*s*0.4, Math.sin(ang)*s*0.4, Math.cos(ang)*s*0.55, Math.sin(ang)*s*0.55],
+        ...opts,
+      }));
+    }
+  } else if (type === "calendar") {
+    g.add(new Konva.Rect({ x: -s*0.5, y: -s*0.4, width: s, height: s*0.8, cornerRadius: s*0.08, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [-s*0.5, -s*0.15, s*0.5, -s*0.15], ...opts }));
+  } else if (type === "bell") {
+    g.add(new Konva.Arc({ innerRadius: 0, outerRadius: s*0.4, angle: 200, rotation: -100, stroke: color, strokeWidth: s*0.08 }));
+    g.add(new Konva.Line({ points: [-s*0.2, s*0.28, s*0.2, s*0.28], ...opts }));
+  } else {
+    g.add(new Konva.Circle({ radius: s*0.3, fill: color }));
+  }
+  return g;
 }
 """
 
@@ -226,28 +288,106 @@ def _build_diagram_html(scene: SceneEvent, duration: float) -> str:
 
 def _build_counter_html(scene: SceneEvent, duration: float) -> str:
     duration_ms = int(max(duration, 0.5) * 1000 * 0.65)
-    return f"""<!DOCTYPE html>
-<html><head><style>
-  body {{ margin:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px; overflow:hidden;
-          font-family:'Arial', sans-serif; background:#0a0a10; }}
-  #stage {{ position:absolute; top:0; left:0; }}
-  .title {{ position:absolute; top:50px; left:60px; font-size:48px; font-weight:800;
-             color:#fff; max-width:900px; z-index:2; text-shadow: 0 0 20px rgba(0,0,0,0.6); }}
-  .counter-label {{ position:absolute; top:0; left:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px;
-                      display:flex; align-items:flex-end; justify-content:center;
-                      padding-bottom: 90px; font-size:38px; opacity:0.9; z-index:2; color:#fff; }}
-</style></head>
-<body>
-  <div id="stage"></div>
-  <div class="title">{scene.title}</div>
-  <div class="counter-label">{scene.counter_label}</div>
-  <script src="file:///app/vendor/konva.min.js"></script>
-  <script>{SHARED_JS}
-    var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
-    var layer = new Konva.Layer();
-    var accent = "{scene.accent_color}";
-    buildAnimatedBackground(layer, accent, {HALF_WIDTH}, {HALF_HEIGHT});
+    style = scene.counter_style if scene.counter_style in ("ring", "bar", "compare") else "ring"
 
+    if style == "bar":
+        js_body = f"""
+    var finalText = "{scene.counter_value}";
+    var numMatch = finalText.match(/[0-9]+/);
+    var finalNum = numMatch ? parseInt(numMatch[0], 10) : 0;
+    var suffix = finalText.replace(/^[^0-9]*[0-9]+/, "");
+    var prefix = finalText.match(/^[^0-9]*/)[0];
+
+    var barX = 90, barY = {HALF_HEIGHT} / 2 - 20, barW = {HALF_WIDTH} - 180, barH = 60;
+
+    var barBg = new Konva.Rect({{
+      x: barX, y: barY, width: barW, height: barH, cornerRadius: barH / 2,
+      fill: "rgba(255,255,255,0.1)",
+    }});
+    layer.add(barBg);
+
+    var barFill = new Konva.Rect({{
+      x: barX, y: barY, width: 0, height: barH, cornerRadius: barH / 2,
+      fill: accent, shadowColor: accent, shadowBlur: 25, shadowOpacity: 0.8,
+    }});
+    layer.add(barFill);
+
+    var counterText = new Konva.Text({{
+      x: 0, y: barY - 130, width: {HALF_WIDTH}, align: "center",
+      text: prefix + "0" + suffix, fontSize: 110, fontStyle: "800",
+      fill: "#fff", shadowColor: accent, shadowBlur: 20, shadowOpacity: 0.8,
+    }});
+    layer.add(counterText);
+    stage.add(layer);
+
+    var start = null;
+    var totalMs = {duration_ms};
+    function step(ts) {{
+      if (!start) start = ts;
+      var progress = Math.min((ts - start) / totalMs, 1);
+      var current = Math.round(finalNum * progress);
+      counterText.text(prefix + current + suffix);
+      barFill.width(barW * progress);
+      layer.batchDraw();
+      if (progress < 1) requestAnimationFrame(step);
+    }}
+    requestAnimationFrame(step);
+"""
+    elif style == "compare":
+        js_body = f"""
+    var leftVal = "{scene.compare_value}";
+    var rightVal = "{scene.counter_value}";
+    var leftLabel = "{scene.compare_label}";
+    var rightLabel = "{scene.counter_label}";
+
+    var leftX = {HALF_WIDTH} * 0.28, rightX = {HALF_WIDTH} * 0.72, cy = {HALF_HEIGHT} / 2;
+
+    var leftText = new Konva.Text({{
+      x: leftX - 150, y: cy - 90, width: 300, align: "center",
+      text: leftVal, fontSize: 100, fontStyle: "800",
+      fill: "rgba(255,255,255,0.5)", opacity: 0,
+    }});
+    layer.add(leftText);
+
+    var rightText = new Konva.Text({{
+      x: rightX - 150, y: cy - 90, width: 300, align: "center",
+      text: rightVal, fontSize: 130, fontStyle: "800",
+      fill: "#fff", shadowColor: accent, shadowBlur: 25, shadowOpacity: 0.9, opacity: 0, scaleX: 0.5, scaleY: 0.5,
+    }});
+    layer.add(rightText);
+
+    var leftLbl = new Konva.Text({{
+      x: leftX - 150, y: cy + 70, width: 300, align: "center",
+      text: leftLabel, fontSize: 28, fill: "rgba(255,255,255,0.6)", opacity: 0,
+    }});
+    layer.add(leftLbl);
+
+    var rightLbl = new Konva.Text({{
+      x: rightX - 150, y: cy + 90, width: 300, align: "center",
+      text: rightLabel, fontSize: 30, fill: "#fff", opacity: 0,
+    }});
+    layer.add(rightLbl);
+
+    var arrow = new Konva.Arrow({{
+      points: [leftX + 90, cy, rightX - 90, cy], stroke: accent, fill: accent,
+      strokeWidth: 6, pointerLength: 22, pointerWidth: 22, opacity: 0,
+      shadowColor: accent, shadowBlur: 15, shadowOpacity: 0.7,
+    }});
+    layer.add(arrow);
+    stage.add(layer);
+
+    leftText.to({{ opacity: 1, duration: 0.4 }});
+    leftLbl.to({{ opacity: 1, duration: 0.4 }});
+    setTimeout(function() {{
+      arrow.to({{ opacity: 0.9, duration: 0.3 }});
+    }}, 300);
+    setTimeout(function() {{
+      rightText.to({{ opacity: 1, scaleX: 1, scaleY: 1, duration: 0.5, easing: Konva.Easings.BackEaseOut }});
+      rightLbl.to({{ opacity: 1, duration: 0.4 }});
+    }}, 650);
+"""
+    else:  # ring
+        js_body = f"""
     var finalText = "{scene.counter_value}";
     var numMatch = finalText.match(/[0-9]+/);
     var finalNum = numMatch ? parseInt(numMatch[0], 10) : 0;
@@ -289,6 +429,30 @@ def _build_counter_html(scene: SceneEvent, duration: float) -> str:
       if (progress < 1) requestAnimationFrame(step);
     }}
     requestAnimationFrame(step);
+"""
+
+    return f"""<!DOCTYPE html>
+<html><head><style>
+  body {{ margin:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px; overflow:hidden;
+          font-family:'Arial', sans-serif; background:#0a0a10; }}
+  #stage {{ position:absolute; top:0; left:0; }}
+  .title {{ position:absolute; top:50px; left:60px; font-size:48px; font-weight:800;
+             color:#fff; max-width:900px; z-index:2; text-shadow: 0 0 20px rgba(0,0,0,0.6); }}
+  .counter-label {{ position:absolute; top:0; left:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px;
+                      display:flex; align-items:flex-end; justify-content:center;
+                      padding-bottom: 90px; font-size:38px; opacity:0.9; z-index:2; color:#fff; }}
+</style></head>
+<body>
+  <div id="stage"></div>
+  <div class="title">{scene.title}</div>
+  <div class="counter-label">{scene.counter_label if style != "compare" else ""}</div>
+  <script src="file:///app/vendor/konva.min.js"></script>
+  <script>{SHARED_JS}
+    var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
+    var layer = new Konva.Layer();
+    var accent = "{scene.accent_color}";
+    buildAnimatedBackground(layer, accent, {HALF_WIDTH}, {HALF_HEIGHT});
+{js_body}
   </script>
 </body></html>"""
 
@@ -296,37 +460,65 @@ def _build_counter_html(scene: SceneEvent, duration: float) -> str:
 def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
     bullets_html = "".join(f'<div class="bullet">{b}</div>' for b in scene.bullets[:3])
     duration_ms = int(max(duration, 0.5) * 1000)
-    return f"""<!DOCTYPE html>
-<html><head><style>
-  body {{ margin:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px; overflow:hidden;
-          font-family:'Arial', sans-serif; background:#0a0a10; }}
-  #stage {{ position:absolute; top:0; left:0; }}
-  .title {{ position:absolute; top:70px; left:60px; font-size:58px; font-weight:800;
-             color:#fff; max-width:900px; z-index:2; text-shadow: 0 0 20px rgba(0,0,0,0.6);
-             opacity:0; animation: fadeSlide 0.6s ease-out 0.1s forwards; }}
-  .bullets {{ position:absolute; top:250px; left:70px; z-index:2; }}
-  .bullet {{ font-size:36px; opacity:0; color:#fff; margin-top:16px;
-              animation: fadeSlide 0.5s ease-out forwards; text-shadow: 0 0 12px rgba(0,0,0,0.6); }}
-  .bullet:nth-child(1) {{ animation-delay: 0.35s; }}
-  .bullet:nth-child(2) {{ animation-delay: 0.55s; }}
-  .bullet:nth-child(3) {{ animation-delay: 0.75s; }}
-  @keyframes fadeSlide {{
-    from {{ opacity: 0; transform: translateX(-30px); }}
-    to {{ opacity: 1; transform: translateX(0); }}
-  }}
-</style></head>
-<body>
-  <div id="stage"></div>
-  <div class="title">{scene.title}</div>
-  <div class="bullets">{bullets_html}</div>
-  <script src="file:///app/vendor/konva.min.js"></script>
-  <script>{SHARED_JS}
-    var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
-    var layer = new Konva.Layer();
-    var accent = "{scene.accent_color}";
-    buildAnimatedBackground(layer, accent, {HALF_WIDTH}, {HALF_HEIGHT});
+    mood = scene.mood if scene.mood in ("illustration", "icons", "typography") else "illustration"
+    icons_json = json.dumps(scene.icons[:3] if scene.icons else ["gear"])
 
-    var accentRgb = hexToRgb(accent);
+    if mood == "icons":
+        js_body = f"""
+    var iconNames = {icons_json};
+    var iconColor = accent;
+    var positions = [
+      {{ x: {HALF_WIDTH} * 0.72, y: {HALF_HEIGHT} * 0.42 }},
+      {{ x: {HALF_WIDTH} * 0.85, y: {HALF_HEIGHT} * 0.68 }},
+      {{ x: {HALF_WIDTH} * 0.60, y: {HALF_HEIGHT} * 0.75 }},
+    ];
+    iconNames.forEach(function(name, i) {{
+      var pos = positions[i % positions.length];
+      var icon = makeIcon(name, pos.x, pos.y, 90, iconColor);
+      icon.opacity(0);
+      icon.scale({{ x: 0.4, y: 0.4 }});
+      layer.add(icon);
+      (function(node, delay) {{
+        setTimeout(function() {{
+          node.to({{ opacity: 1, scaleX: 1, scaleY: 1, duration: 0.5, easing: Konva.Easings.BackEaseOut }});
+          function pulseLoop() {{
+            node.to({{
+              scaleX: 1.12, scaleY: 1.12, duration: 1.0, easing: Konva.Easings.EaseInOut,
+              onFinish: function() {{
+                node.to({{ scaleX: 1, scaleY: 1, duration: 1.0, easing: Konva.Easings.EaseInOut, onFinish: pulseLoop }});
+              }},
+            }});
+          }}
+          setTimeout(pulseLoop, 500);
+        }}, delay);
+      }})(icon, 300 + i * 250);
+    }});
+    stage.add(layer);
+"""
+    elif mood == "typography":
+        js_body = f"""
+    var titleText = new Konva.Text({{
+      x: 60, y: {HALF_HEIGHT} * 0.38, width: {HALF_WIDTH} - 120,
+      text: "{scene.title}", fontSize: 88, fontStyle: "900", fill: "#fff",
+      shadowColor: accent, shadowBlur: 30, shadowOpacity: 0.9,
+      opacity: 0, scaleX: 0.85, scaleY: 0.85,
+    }});
+    layer.add(titleText);
+    stage.add(layer);
+    titleText.to({{
+      opacity: 1, scaleX: 1, scaleY: 1, duration: 0.6, easing: Konva.Easings.BackEaseOut,
+    }});
+    var underline = new Konva.Rect({{
+      x: 64, y: {HALF_HEIGHT} * 0.38 + 100, width: 0, height: 8,
+      fill: accent, shadowColor: accent, shadowBlur: 15, shadowOpacity: 0.8,
+    }});
+    layer.add(underline);
+    setTimeout(function() {{
+      underline.to({{ width: 260, duration: 0.5, easing: Konva.Easings.EaseOut }});
+    }}, 400);
+"""
+    else:  # illustration
+        js_body = f"""
     var pulses = [];
     for (var i = 0; i < 3; i++) {{
       var pc = new Konva.Circle({{
@@ -349,8 +541,41 @@ def _build_dynamic_html(scene: SceneEvent, duration: float) -> str:
         }}, delay);
       }})(pc, i * 300);
     }}
-
     stage.add(layer);
+"""
+
+    title_html = "" if mood == "typography" else f'<div class="title">{scene.title}</div>'
+
+    return f"""<!DOCTYPE html>
+<html><head><style>
+  body {{ margin:0; width:{HALF_WIDTH}px; height:{HALF_HEIGHT}px; overflow:hidden;
+          font-family:'Arial', sans-serif; background:#0a0a10; }}
+  #stage {{ position:absolute; top:0; left:0; }}
+  .title {{ position:absolute; top:70px; left:60px; font-size:58px; font-weight:800;
+             color:#fff; max-width:900px; z-index:2; text-shadow: 0 0 20px rgba(0,0,0,0.6);
+             opacity:0; animation: fadeSlide 0.6s ease-out 0.1s forwards; }}
+  .bullets {{ position:absolute; top:250px; left:70px; z-index:2; }}
+  .bullet {{ font-size:36px; opacity:0; color:#fff; margin-top:16px;
+              animation: fadeSlide 0.5s ease-out forwards; text-shadow: 0 0 12px rgba(0,0,0,0.6); }}
+  .bullet:nth-child(1) {{ animation-delay: 0.35s; }}
+  .bullet:nth-child(2) {{ animation-delay: 0.55s; }}
+  .bullet:nth-child(3) {{ animation-delay: 0.75s; }}
+  @keyframes fadeSlide {{
+    from {{ opacity: 0; transform: translateX(-30px); }}
+    to {{ opacity: 1; transform: translateX(0); }}
+  }}
+</style></head>
+<body>
+  <div id="stage"></div>
+  {title_html}
+  <div class="bullets">{bullets_html}</div>
+  <script src="file:///app/vendor/konva.min.js"></script>
+  <script>{SHARED_JS}
+    var stage = new Konva.Stage({{ container: 'stage', width: {HALF_WIDTH}, height: {HALF_HEIGHT} }});
+    var layer = new Konva.Layer();
+    var accent = "{scene.accent_color}";
+    buildAnimatedBackground(layer, accent, {HALF_WIDTH}, {HALF_HEIGHT});
+{js_body}
   </script>
 </body></html>"""
 
@@ -430,13 +655,6 @@ class KonvaSceneEngine:
             console_errors = []
             page.on("console", lambda msg: console_errors.append(f"[{msg.type}] {msg.text}") if msg.type == "error" else None)
             page.on("pageerror", lambda exc: console_errors.append(f"[pageerror] {exc}"))
-            # Record slightly longer than the requested duration — the
-            # encoded webm can come back a touch shorter than the wait
-            # time due to recorder startup/flush overhead. Without this
-            # buffer, a shortfall would silently trigger the loop
-            # fallback at render time, reintroducing the exact startup
-            # flash (blank page -> body background) this was meant to
-            # eliminate.
             # Record extra time at both ends: the first ~0.4s of any
             # fresh browser recording shows a natural startup sequence
             # (blank tab -> HTML/CSS loads -> Konva paints) that reads as
