@@ -220,6 +220,8 @@ export default function Home() {
   const [chatMessage, setChatMessage] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [chatNotes, setChatNotes] = useState<string | null>(null);
+  const [segmentOverrides, setSegmentOverrides] = useState<Record<string, string>>({});
+  const [overrideUploadingSeg, setOverrideUploadingSeg] = useState<string | null>(null);
 
   function handlePresetChange(preset: string) {
     setStylePreset(preset);
@@ -318,18 +320,25 @@ export default function Home() {
       setExpandedId(null);
       setDetail(null);
       setChatNotes(null);
+      setSegmentOverrides({});
       return;
     }
     setExpandedId(project.id);
     setDetail(null);
     setChatNotes(null);
     setChatMessage("");
+    setSegmentOverrides({});
     setDetailLoading(true);
     try {
       const res = await fetch(`${API_URL}/timeline/${project.id}`);
       if (res.ok) {
         const data = await res.json();
         setDetail(data);
+      }
+      const ovRes = await fetch(`${API_URL}/segment-clip/${project.id}`);
+      if (ovRes.ok) {
+        const ovData = await ovRes.json();
+        setSegmentOverrides(ovData.overrides || {});
       }
     } catch {
       // leave detail null — panel will show nothing loaded
@@ -356,6 +365,44 @@ export default function Home() {
       setChatNotes("Failed to apply that change — network error.");
     } finally {
       setChatSending(false);
+    }
+  }
+
+  async function uploadSegmentClip(projectId: string, segmentId: string, file: File) {
+    setOverrideUploadingSeg(segmentId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/segment-clip/${projectId}/${segmentId}`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSegmentOverrides(data.overrides || {});
+      }
+    } catch {
+      // upload failed — row just stays in its current state
+    } finally {
+      setOverrideUploadingSeg(null);
+    }
+  }
+
+  async function removeSegmentClip(projectId: string, segmentId: string) {
+    setOverrideUploadingSeg(segmentId);
+    try {
+      const res = await fetch(`${API_URL}/segment-clip/${projectId}/${segmentId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setSegmentOverrides((prev) => {
+          const next = { ...prev };
+          delete next[segmentId];
+          return next;
+        });
+      }
+    } finally {
+      setOverrideUploadingSeg(null);
     }
   }
 
@@ -694,6 +741,138 @@ export default function Home() {
                         >
                           {detail.creative_treatment ||
                             "No treatment generated yet — run Generate Timeline first."}
+                        </p>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <strong style={{ fontSize: 13 }}>Timeline</strong>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            maxHeight: 260,
+                            overflowY: "auto",
+                            background: "#fff",
+                            border: "1px solid #eee",
+                            borderRadius: 6,
+                          }}
+                        >
+                          {(() => {
+                            const segments: any[] = detail.timeline_json?.segments || [];
+                            const sceneById: Record<string, any> = {};
+                            (detail.timeline_json?.scene_events || []).forEach((sc: any) => {
+                              sceneById[sc.segment_id] = sc;
+                            });
+                            if (!segments.length) {
+                              return (
+                                <p style={{ color: "#aaa", fontSize: 12, padding: 8 }}>
+                                  No timeline yet — run Generate Timeline first.
+                                </p>
+                              );
+                            }
+                            return segments.map((seg, i) => {
+                              const scene = sceneById[seg.id];
+                              const hasOverride = !!segmentOverrides[seg.id];
+                              const isUploadingThis = overrideUploadingSeg === seg.id;
+                              return (
+                                <div
+                                  key={seg.id}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    padding: "8px 10px",
+                                    borderBottom: i < segments.length - 1 ? "1px solid #f0f0f0" : "none",
+                                  }}
+                                >
+                                  <span style={{ fontSize: 11, color: "#999", width: 56, flexShrink: 0 }}>
+                                    {Number(seg.start).toFixed(1)}s
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 8px",
+                                      borderRadius: 10,
+                                      background: hasOverride
+                                        ? "#2d8fd6"
+                                        : scene
+                                        ? "#7c4dff"
+                                        : "#ccc",
+                                      color: "#fff",
+                                      flexShrink: 0,
+                                      textTransform: "capitalize",
+                                    }}
+                                  >
+                                    {hasOverride
+                                      ? "your clip"
+                                      : scene
+                                      ? scene.layout_type === "dynamic"
+                                        ? `dynamic${scene.mood ? ` (${scene.mood})` : ""}`
+                                        : scene.layout_type
+                                      : "no scene"}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      color: "#555",
+                                      flex: 1,
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {seg.text}
+                                  </span>
+                                  <label
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "3px 8px",
+                                      borderRadius: 6,
+                                      border: "1px solid #ccc",
+                                      background: "#fff",
+                                      cursor: isUploadingThis ? "wait" : "pointer",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {isUploadingThis ? "…" : hasOverride ? "Replace" : "Upload clip"}
+                                    <input
+                                      type="file"
+                                      accept="video/*"
+                                      style={{ display: "none" }}
+                                      disabled={isUploadingThis}
+                                      onChange={(e) => {
+                                        const f = e.target.files?.[0];
+                                        if (f) uploadSegmentClip(proj.id, seg.id, f);
+                                        e.target.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  {hasOverride && (
+                                    <button
+                                      onClick={() => removeSegmentClip(proj.id, seg.id)}
+                                      disabled={isUploadingThis}
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "3px 8px",
+                                        borderRadius: 6,
+                                        border: "1px solid #d64545",
+                                        background: "#fff",
+                                        color: "#d64545",
+                                        cursor: isUploadingThis ? "wait" : "pointer",
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                        <p style={{ fontSize: 12, color: "#999", marginTop: 6 }}>
+                          Upload your own clip for a segment (a real dashboard/chat demo, or a
+                          manually-generated AI video) to use it instead of the auto-generated
+                          scene — press Render again afterward to see it.
                         </p>
                       </div>
 
